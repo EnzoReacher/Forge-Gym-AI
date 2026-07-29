@@ -61,6 +61,14 @@ A redesigned screen does not ship until:
 6. The implementation replaces legacy CSS rather than stacking a new theme on
    top.
 
+### Raw Steel delivery
+
+- [x] Phase 1: replace the accumulated landing, login, onboarding, and
+  cinematic-entry layers with one direct, restrained entry system.
+- [ ] Phase 2: apply the same rules to Today, Train, Fuel, Coach, and Progress.
+- [ ] Phase 3: complete keyboard, reduced-motion, mobile, and beginner
+  comprehension checks across the whole athlete flow.
+
 ## Next — trustworthy core records
 
 - Model workouts, sets, meals, hydration, and progress as durable records rather
@@ -93,3 +101,12 @@ A redesigned screen does not ship until:
 
 Admin, billing, and mobile must not force the athlete interface to become more
 complex today.
+
+## Deferred hosting review
+
+- Re-evaluate Netlify only after the core records, Raw Steel, and security gates
+  are stable.
+- The current Netlify experiment deployed repository source files and must not
+  be treated as a production release.
+- Any future migration needs a written compatibility plan for identity, D1,
+  API routes, secrets, rollback, and runtime monitoring before deployment.

@@ -39,7 +39,7 @@ test("the primary sign-in screen never collects a password", async () => {
   const page = await source("app/page.tsx");
 
   assert.doesNotMatch(page, /type="password"/);
-  assert.match(page, /CONTINUE WITH CHATGPT/);
+  assert.match(page, /Continue with ChatGPT/);
 });
 
 test("durable account state uses the managed D1 binding", async () => {
