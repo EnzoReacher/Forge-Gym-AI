@@ -912,8 +912,13 @@
   z-index: 5;
   left: 50%;
   bottom: 28px;
-  color: rgba(154,142,132,.5);
-  font-size: 9px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid rgba(205,190,171,.24);
+  background: rgba(7,7,6,.72);
+  color: #aaa198;
+  font-size: 12px;
+  cursor: pointer;
   transform: translateX(-50%);
   animation: cinematic-detail var(--cinematic-duration) ease both;
 }
