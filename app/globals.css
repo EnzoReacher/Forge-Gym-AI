@@ -5840,3 +5840,162 @@ h1,h2,h3 { color: var(--spartan-bone); }
     display: block;
   }
 }
+
+/* FORGE account foundation — one secure entry, account-owned state */
+.secure-entry-copy {
+  margin: 30px 0 18px;
+  padding: 18px 19px;
+  border: 1px solid rgba(215,170,103,.14);
+  border-left: 2px solid rgba(237,74,52,.7);
+  background: rgba(255,255,255,.018);
+}
+.secure-entry-copy span {
+  color: #ba8b57;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .17em;
+}
+.secure-entry-copy p {
+  margin: 9px 0 0;
+  color: #948a81;
+  font-size: 10px;
+  line-height: 1.65;
+}
+.secure-entry-action {
+  width: 100%;
+  min-height: 58px;
+}
+.secure-entry-note {
+  margin: 14px auto 0;
+  max-width: 310px;
+  color: #6f6861;
+  font-size: 8px;
+  line-height: 1.55;
+  text-align: center;
+  display: block;
+}
+.account-loading {
+  position: fixed;
+  inset: 0;
+  isolation: isolate;
+  overflow: hidden;
+  background: #080807;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  color: #fff4e6;
+}
+.account-loading strong {
+  position: relative;
+  z-index: 1;
+  font: 800 clamp(42px,8vw,72px) var(--heading);
+  letter-spacing: .24em;
+  text-indent: .24em;
+}
+.account-loading span {
+  position: relative;
+  z-index: 1;
+  color: #9a8f84;
+  font-size: 9px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.account-error {
+  padding: 24px;
+  text-align: center;
+}
+.account-error button {
+  position: relative;
+  z-index: 1;
+  min-width: 150px;
+  min-height: 46px;
+  margin-top: 12px;
+  border: 1px solid rgba(237,74,52,.5);
+  border-radius: 5px;
+  background: rgba(237,74,52,.1);
+  color: #fff4e6;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+.sync-warning {
+  position: fixed;
+  z-index: 80;
+  right: 18px;
+  bottom: 18px;
+  max-width: min(360px,calc(100vw - 36px));
+  padding: 12px 15px;
+  border: 1px solid rgba(232,171,77,.38);
+  border-radius: 6px;
+  background: rgba(24,19,12,.96);
+  color: #e7cfaa;
+  font-size: 9px;
+  line-height: 1.5;
+  box-shadow: 0 14px 36px rgba(0,0,0,.36);
+}
+.account-profile label {
+  margin-top: 16px;
+  color: #8d704f;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  display: grid;
+  gap: 8px;
+}
+.account-profile input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 13px;
+  border: 1px solid rgba(215,170,103,.18);
+  border-radius: 6px;
+  outline: 0;
+  background: rgba(255,255,255,.025);
+  color: #f4e9dc;
+  font: inherit;
+  letter-spacing: 0;
+}
+.account-profile input:focus {
+  border-color: rgba(237,74,52,.55);
+  box-shadow: 0 0 0 3px rgba(237,74,52,.08);
+}
+.demo-tools > a {
+  width: 100%;
+  min-height: 58px;
+  padding: 0 13px;
+  border: 1px solid rgba(215,170,103,.13);
+  border-radius: 5px;
+  background: linear-gradient(90deg,rgba(215,170,103,.035),transparent);
+  color: inherit;
+  display: grid;
+  grid-template-columns: 1fr 22px;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  text-decoration: none;
+}
+.demo-tools > a:hover {
+  border-color: rgba(232,75,50,.34);
+  background: linear-gradient(90deg,rgba(154,39,24,.16),transparent);
+}
+.demo-tools > a span,
+.demo-tools > a b,
+.demo-tools > a small {
+  display: block;
+}
+.demo-tools > a b {
+  color: #e8ddd3;
+  font-size: 8px;
+  letter-spacing: .1em;
+}
+.demo-tools > a small {
+  margin-top: 4px;
+  color: #746c65;
+  font-size: 7px;
+}
+.demo-tools > a i {
+  justify-self: end;
+  color: #e44a32;
+  font-size: 14px;
+  font-style: normal;
+}

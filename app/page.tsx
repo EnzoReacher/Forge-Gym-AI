@@ -6,6 +6,8 @@ type Screen = "Today" | "Train" | "Fuel" | "Coach" | "Progress";
 type TrainView = "Session" | "Week" | "Library";
 type EntryStage = "landing" | "login" | "onboarding" | "app";
 type LaunchMode = "return" | "new";
+export type ForgeAuthenticatedUser = { displayName: string; email: string };
+type ForgeProfile = { displayName: string; units: "Metric" | "Imperial"; notifications: boolean };
 type SetLog = { kg: number; reps: number; rir?: number; done: boolean };
 type Exercise = { id: string; name: string; target: string; cue: string; sets: SetLog[] };
 type Meal = { id: number; time: string; name: string; detail: string; kcal: number; protein: number };
@@ -84,7 +86,7 @@ const ForgeAmbience = memo(function ForgeAmbience({ density = 120 }: { density?:
   );
 });
 
-function CinematicIntro({ mode, onSkip }: { mode: LaunchMode; onSkip: () => void }) {
+function CinematicIntro({ mode, athleteName, onSkip }: { mode: LaunchMode; athleteName: string; onSkip: () => void }) {
   return (
     <div
       className={`cinematic-gate cinematic-${mode}`}
@@ -102,7 +104,7 @@ function CinematicIntro({ mode, onSkip }: { mode: LaunchMode; onSkip: () => void
       <div className="cinematic-vignette" aria-hidden="true" />
       <div className="cinematic-strike" aria-hidden="true" />
       <div className="cinematic-mark">
-        <span>{mode === "return" ? "WELCOME BACK, HOÀNG" : "PROTOCOL FORGED"}</span>
+        <span>{mode === "return" ? `WELCOME BACK, ${athleteName.toUpperCase()}` : "PROTOCOL FORGED"}</span>
         <h1>FORGE</h1>
         <div className="cinematic-rule"><i /></div>
         <p>{mode === "return" ? "LET’S FIGHT." : "ENTER THE ARENA."}</p>
@@ -179,10 +181,42 @@ const exerciseLibrary: LibraryMove[] = [
   { target: "LEGS", name: "Hip abduction", role: "Recovery · Knee friendly", cue: "Pain-free ROM", startKg: 25, reps: 15 },
 ];
 
-function useStoredState<T>(key: string, fallback: T) {
+function useStoredState<T>(key: string, fallback: T, accountBacked = false) {
   const [value, setValue] = useState<T>(fallback);
   const [ready, setReady] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [syncError, setSyncError] = useState(false);
+
   useEffect(() => {
+    let cancelled = false;
+
+    if (accountBacked) {
+      fetch(`/api/state?key=${encodeURIComponent(key)}`, {
+        headers: { Accept: "application/json" },
+        credentials: "same-origin",
+      })
+        .then(async (response) => {
+          if (!response.ok) throw new Error("account_state_unavailable");
+          return response.json() as Promise<{ value: T | null }>;
+        })
+        .then((payload) => {
+          if (!cancelled) {
+            setLoadError(false);
+            if (payload.value !== null) setValue(payload.value);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setLoadError(true);
+        })
+        .finally(() => {
+          if (!cancelled) setReady(true);
+        });
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const frame = window.requestAnimationFrame(() => {
       try {
         const stored = window.localStorage.getItem(key);
@@ -191,12 +225,33 @@ function useStoredState<T>(key: string, fallback: T) {
       setReady(true);
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [key]);
+  }, [accountBacked, key]);
+
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || (accountBacked && loadError)) return;
+
+    if (accountBacked) {
+      const id = window.setTimeout(() => {
+        fetch(`/api/state?key=${encodeURIComponent(key)}`, {
+          method: "PUT",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ value }),
+        })
+          .then((response) => {
+            if (!response.ok) throw new Error("account_state_save_failed");
+            setSyncError(false);
+          })
+          .catch(() => setSyncError(true));
+      }, 450);
+
+      return () => window.clearTimeout(id);
+    }
+
     try { window.localStorage.setItem(key, JSON.stringify(value)); } catch {}
-  }, [key, ready, value]);
-  return [value, setValue] as const;
+  }, [accountBacked, key, loadError, ready, value]);
+
+  return [value, setValue, ready, loadError, syncError] as const;
 }
 
 function EntryFlow({ onEnter, initialStage = "landing" }: { onEnter: (mode: LaunchMode) => void; initialStage?: Exclude<EntryStage, "app"> }) {
@@ -384,14 +439,12 @@ function EntryFlow({ onEnter, initialStage = "landing" }: { onEnter: (mode: Laun
           <div className="login-card">
             <p className="login-index">SECURE ENTRY / FORGE ID</p>
             <header><p><strong>Your protocol awaits.</strong><small>Sign in and continue from your last completed rep.</small></p></header>
-            <form onSubmit={(event) => { event.preventDefault(); onEnter("return"); }}>
-              <label>ATHLETE EMAIL<input type="email" required placeholder="warrior@forge.ai" /></label>
-              <label>ACCESS KEY<input type="password" required placeholder="••••••••" /></label>
-              <div className="login-options"><label><input type="checkbox" /> Keep me signed in</label><button type="button">Forgot password?</button></div>
-              <button className="entry-primary" type="submit">ENTER FORGE <span>→</span></button>
-            </form>
-            <div className="login-divider"><span>OR CONTINUE WITH</span></div>
-            <button className="demo-login" onClick={() => onEnter("return")}><b>H</b><span>HOÀNG / DEMO ATHLETE<small>Open the complete training system</small></span><i>→</i></button>
+            <div className="secure-entry-copy">
+              <span>ONE SECURE STEP</span>
+              <p>FORGE uses your ChatGPT identity. It never asks for or stores your password.</p>
+            </div>
+            <button className="entry-primary secure-entry-action" onClick={() => onEnter("return")}>CONTINUE WITH CHATGPT <span>→</span></button>
+            <small className="secure-entry-note">Your training records stay attached to your account, not this browser.</small>
             <footer>No protocol yet? <button onClick={() => setStage("onboarding")}>Forge one now</button></footer>
           </div>
         </section>
@@ -477,20 +530,41 @@ function EntryFlow({ onEnter, initialStage = "landing" }: { onEnter: (mode: Laun
   );
 }
 
-export default function Home() {
-  const [entryStage, setEntryStage] = useState<EntryStage>("landing");
+export default function Home({
+  initialEntryStage = "landing",
+  initialLaunchMode = null,
+  authenticatedUser = null,
+}: {
+  initialEntryStage?: EntryStage;
+  initialLaunchMode?: LaunchMode | null;
+  authenticatedUser?: ForgeAuthenticatedUser | null;
+}) {
+  const accountBacked = Boolean(authenticatedUser);
+  const identityName = authenticatedUser?.displayName?.trim() || "Athlete";
+  const defaultProfile: ForgeProfile = {
+    displayName: identityName,
+    units: "Metric",
+    notifications: true,
+  };
+  const [entryStage, setEntryStage] = useState<EntryStage>(initialEntryStage);
   const [screen, setScreen] = useState<Screen>("Today");
-  const [exercises, setExercises] = useStoredState("forge-exercises", initialExercises);
-  const [meals, setMeals] = useStoredState("forge-meals", initialMeals);
-  const [water, setWater] = useStoredState("forge-water", 1750);
-  const [workoutStarted, setWorkoutStarted] = useStoredState("forge-workout-live", false);
-  const [workoutStartedAt, setWorkoutStartedAt] = useStoredState("forge-workout-started-at", 0);
-  const [workoutHistory, setWorkoutHistory] = useStoredState<WorkoutSummary[]>("forge-workout-history", []);
+  const [exercises, setExercises, exercisesReady, exercisesLoadError, exercisesSyncError] = useStoredState("forge-exercises", initialExercises, accountBacked);
+  const [meals, setMeals, mealsReady, mealsLoadError, mealsSyncError] = useStoredState("forge-meals", accountBacked ? [] : initialMeals, accountBacked);
+  const [water, setWater, waterReady, waterLoadError, waterSyncError] = useStoredState("forge-water", accountBacked ? 0 : 1750, accountBacked);
+  const [workoutStarted, setWorkoutStarted, workoutReady, workoutLoadError, workoutSyncError] = useStoredState("forge-workout-live", false, accountBacked);
+  const [workoutStartedAt, setWorkoutStartedAt, startedAtReady, startedAtLoadError, startedAtSyncError] = useStoredState("forge-workout-started-at", 0, accountBacked);
+  const [workoutHistory, setWorkoutHistory, historyReady, historyLoadError, historySyncError] = useStoredState<WorkoutSummary[]>("forge-workout-history", [], accountBacked);
+  const [profile, setProfile, profileReady, profileLoadError, profileSyncError] = useStoredState<ForgeProfile>("forge-profile", defaultProfile, accountBacked);
   const [commandOpen, setCommandOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [toast, setToast] = useState("");
-  const [launchMode, setLaunchMode] = useState<LaunchMode | null>(null);
+  const [launchMode, setLaunchMode] = useState<LaunchMode | null>(initialLaunchMode);
   const [finishSummary, setFinishSummary] = useState<WorkoutSummary | null>(null);
+  const accountReady = !accountBacked || [exercisesReady, mealsReady, waterReady, workoutReady, startedAtReady, historyReady, profileReady].every(Boolean);
+  const accountLoadError = accountBacked && [exercisesLoadError, mealsLoadError, waterLoadError, workoutLoadError, startedAtLoadError, historyLoadError, profileLoadError].some(Boolean);
+  const accountSyncError = accountBacked && [exercisesSyncError, mealsSyncError, waterSyncError, workoutSyncError, startedAtSyncError, historySyncError, profileSyncError].some(Boolean);
+  const athleteName = profile.displayName.trim().split(/\s+/)[0] || "Athlete";
+  const athleteInitial = athleteName.slice(0, 1).toUpperCase();
 
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
@@ -553,11 +627,19 @@ export default function Home() {
   if (entryStage !== "app" && !launchMode) {
     return <EntryFlow
       onEnter={(mode) => {
-        setEntryStage("app");
-        setLaunchMode(mode);
+        const returnTo = mode === "new" ? "/app?welcome=new" : "/app";
+        window.location.assign(`/signin-with-chatgpt?return_to=${encodeURIComponent(returnTo)}`);
       }}
       initialStage={entryStage}
     />;
+  }
+
+  if (!accountReady) {
+    return <div className="account-loading" role="status" aria-live="polite"><ForgeAmbience density={22} /><strong>FORGE</strong><span>Loading your protocol…</span></div>;
+  }
+
+  if (accountLoadError) {
+    return <div className="account-loading account-error" role="alert"><ForgeAmbience density={12} /><strong>FORGE</strong><span>Your account data could not be loaded safely.</span><button onClick={() => window.location.reload()}>TRY AGAIN</button></div>;
   }
 
   return (
@@ -573,12 +655,12 @@ export default function Home() {
           </nav>
           <div className="top-actions">
             <button className="quick-command" onClick={() => setCommandOpen(true)} aria-label="Open quick actions"><ForgeIcon name="plus"/><span>QUICK</span></button>
-            <button className="avatar" onClick={() => setProfileOpen(true)} aria-label="Open profile">H</button>
+            <button className="avatar" onClick={() => setProfileOpen(true)} aria-label="Open profile">{athleteInitial}</button>
           </div>
         </header>
 
         <main className="workspace">
-          {screen === "Today" && <Today exercises={exercises} meals={meals} water={water} workoutStarted={workoutStarted} lastWorkout={workoutHistory[0]} onStart={startWorkout} onCoach={() => go("Coach")} onProgress={() => go("Progress")} />}
+          {screen === "Today" && <Today athleteName={athleteName} exercises={exercises} meals={meals} water={water} workoutStarted={workoutStarted} lastWorkout={workoutHistory[0]} onStart={startWorkout} onCoach={() => go("Coach")} onProgress={() => go("Progress")} />}
           {screen === "Train" && <Train exercises={exercises} setExercises={setExercises} started={workoutStarted} setStarted={setWorkoutStarted} startedAt={workoutStartedAt} setStartedAt={setWorkoutStartedAt} onFinish={finishWorkout} notify={setToast} />}
           {screen === "Fuel" && <Fuel meals={meals} setMeals={setMeals} water={water} setWater={setWater} notify={setToast} />}
           {screen === "Coach" && <Coach exercises={exercises} meals={meals} />}
@@ -591,6 +673,13 @@ export default function Home() {
 
         {commandOpen && <CommandPalette onClose={() => setCommandOpen(false)} go={go} startWorkout={startWorkout} addWater={() => { setWater((value) => Math.min(3200, value + 250)); setCommandOpen(false); setToast("250 ml water logged."); }} />}
         {profileOpen && <ProfileDrawer
+          profile={profile}
+          email={authenticatedUser?.email ?? ""}
+          onSave={(next) => {
+            setProfile(next);
+            setProfileOpen(false);
+            setToast("Profile saved to your account.");
+          }}
           onClose={() => setProfileOpen(false)}
           onReplayLogin={() => {
             setProfileOpen(false);
@@ -602,6 +691,7 @@ export default function Home() {
           }}
         />}
         {toast && <div className="toast" role="status" aria-live="polite"><i>✓</i>{toast}</div>}
+        {accountSyncError && <div className="sync-warning" role="status">Account sync paused. Keep this page open and try your action again.</div>}
       </div>
       {finishSummary && <WorkoutComplete
         summary={finishSummary}
@@ -614,7 +704,7 @@ export default function Home() {
           go("Progress");
         }}
       />}
-      {launchMode && <CinematicIntro mode={launchMode} onSkip={() => {
+      {launchMode && <CinematicIntro mode={launchMode} athleteName={athleteName} onSkip={() => {
         setEntryStage("app");
         setLaunchMode(null);
       }} />}
@@ -622,7 +712,7 @@ export default function Home() {
   );
 }
 
-function Today({ exercises, meals, water, workoutStarted, lastWorkout, onStart, onCoach, onProgress }: { exercises: Exercise[]; meals: Meal[]; water: number; workoutStarted: boolean; lastWorkout?: WorkoutSummary; onStart: () => void; onCoach: () => void; onProgress: () => void }) {
+function Today({ athleteName, exercises, meals, water, workoutStarted, lastWorkout, onStart, onCoach, onProgress }: { athleteName: string; exercises: Exercise[]; meals: Meal[]; water: number; workoutStarted: boolean; lastWorkout?: WorkoutSummary; onStart: () => void; onCoach: () => void; onProgress: () => void }) {
   const allSets = exercises.flatMap((exercise) => exercise.sets);
   const doneSets = allSets.filter((set) => set.done).length;
   const calories = meals.reduce((total, meal) => total + meal.kcal, 0);
@@ -634,7 +724,7 @@ function Today({ exercises, meals, water, workoutStarted, lastWorkout, onStart, 
   return (
     <div className="screen">
       <section className="day-heading">
-        <div><p className="eyebrow">MONDAY · 27 JULY</p><h1>Good afternoon, Hoàng.</h1><span>You&apos;re recovered and on track. One strong session closes the day.</span><div className="forge-motto"><b>FORGE THE NEXT REP</b><i/><span>Strength block 02 · Week 3</span></div></div>
+        <div><p className="eyebrow">MONDAY · 27 JULY</p><h1>Good afternoon, {athleteName}.</h1><span>You&apos;re recovered and on track. One strong session closes the day.</span><div className="forge-motto"><b>FORGE THE NEXT REP</b><i/><span>Strength block 02 · Week 3</span></div></div>
       </section>
 
       <div className="today-layout">
@@ -1183,21 +1273,37 @@ function MealDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (meal: Omi
   </div>;
 }
 
-function ProfileDrawer({ onClose, onReplayLogin, onReplayOnboarding }: { onClose: () => void; onReplayLogin: () => void; onReplayOnboarding: () => void }) {
-  const [notifications, setNotifications] = useState(true);
-  const [units, setUnits] = useState("Metric");
+function ProfileDrawer({
+  profile,
+  email,
+  onClose,
+  onSave,
+  onReplayLogin,
+  onReplayOnboarding,
+}: {
+  profile: ForgeProfile;
+  email: string;
+  onClose: () => void;
+  onSave: (profile: ForgeProfile) => void;
+  onReplayLogin: () => void;
+  onReplayOnboarding: () => void;
+}) {
+  const [draft, setDraft] = useState(profile);
+  const displayName = draft.displayName.trim() || "Athlete";
+
   return <div className="drawer-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <aside className="profile-drawer">
-      <header><div><span>H</span><p><strong>Hoàng</strong><small>Strength athlete</small></p></div><button onClick={onClose}>×</button></header>
-      <section><p className="eyebrow">ATHLETE PROFILE</p><dl><div><dt>Height</dt><dd>184 cm</dd></div><div><dt>Bodyweight</dt><dd>87.4 kg</dd></div><div><dt>Training</dt><dd>5 days / week</dd></div><div><dt>Primary goal</dt><dd>Strength + muscle</dd></div></dl></section>
+      <header><div><span>{displayName.slice(0, 1).toUpperCase()}</span><p><strong>{displayName}</strong><small>{email || "Signed-in athlete"}</small></p></div><button onClick={onClose}>×</button></header>
+      <section className="account-profile"><p className="eyebrow">ATHLETE PROFILE</p><label>DISPLAY NAME<input value={draft.displayName} maxLength={80} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="How Forge should address you" /></label><dl><div><dt>Account</dt><dd>Protected</dd></div><div><dt>Plan</dt><dd>Free</dd></div><div><dt>Data</dt><dd>Account synced</dd></div></dl></section>
       <section><p className="eyebrow">COACH GUARDRAILS</p><ul><li>Protect right knee during return to load.</li><li>Progress only with clean ROM and control.</li><li>Prioritize chest, back, calves and forearms.</li></ul></section>
-      <section><p className="eyebrow">PREFERENCES</p><div className="preference"><span>Units</span><div>{["Metric", "Imperial"].map((item) => <button className={units === item ? "active" : ""} onClick={() => setUnits(item)} key={item}>{item}</button>)}</div></div><div className="preference"><span>Session reminders</span><button className={`toggle ${notifications ? "on" : ""}`} onClick={() => setNotifications((value) => !value)}><i /></button></div></section>
+      <section><p className="eyebrow">PREFERENCES</p><div className="preference"><span>Units</span><div>{(["Metric", "Imperial"] as const).map((item) => <button className={draft.units === item ? "active" : ""} onClick={() => setDraft((current) => ({ ...current, units: item }))} key={item}>{item}</button>)}</div></div><div className="preference"><span>Session reminders</span><button className={`toggle ${draft.notifications ? "on" : ""}`} onClick={() => setDraft((current) => ({ ...current, notifications: !current.notifications }))}><i /></button></div></section>
       <section className="demo-tools">
-        <p className="eyebrow">DEMO TOOLS</p>
-        <button onClick={onReplayLogin}><span><b>LOGIN CINEMATIC</b><small>Replay the 1.25 second welcome</small></span><i>↗</i></button>
-        <button onClick={onReplayOnboarding}><span><b>ONBOARDING FLOW</b><small>Restart all 3 steps and final cinematic</small></span><i>→</i></button>
+        <p className="eyebrow">ACCOUNT</p>
+        <button onClick={onReplayLogin}><span><b>REPLAY WELCOME</b><small>Replay the short cinematic</small></span><i>↗</i></button>
+        <button onClick={onReplayOnboarding}><span><b>RECALIBRATE PLAN</b><small>Review the three setup choices</small></span><i>→</i></button>
+        <a href="/signout-with-chatgpt?return_to=%2F"><span><b>SIGN OUT</b><small>Securely end this session</small></span><i>→</i></a>
       </section>
-      <button className="outline-action drawer-save" onClick={onClose}>Save preferences</button>
+      <button className="outline-action drawer-save" disabled={!draft.displayName.trim()} onClick={() => onSave({ ...draft, displayName: draft.displayName.trim() })}>Save preferences</button>
     </aside>
   </div>;
 }
