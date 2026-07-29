@@ -65,7 +65,7 @@ A redesigned screen does not ship until:
 
 - [x] Phase 1: replace the accumulated landing, login, onboarding, and
   cinematic-entry layers with one direct, restrained entry system.
-- [ ] Phase 2: apply the same rules to Today, Train, Fuel, Coach, and Progress.
+- [x] Phase 2: apply the same rules to Today, Train, Fuel, Coach, and Progress.
 - [ ] Phase 3: complete keyboard, reduced-motion, mobile, and beginner
   comprehension checks across the whole athlete flow.
 
