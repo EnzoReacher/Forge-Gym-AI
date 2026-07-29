@@ -565,7 +565,7 @@ export default function Home({
     const id = window.setTimeout(() => {
       setEntryStage("app");
       setLaunchMode(null);
-    }, reducedMotion ? 450 : launchMode === "return" ? 1250 : 3000);
+    }, reducedMotion ? 320 : launchMode === "return" ? 1050 : 2150);
     return () => window.clearTimeout(id);
   }, [launchMode]);
 
@@ -607,17 +607,17 @@ export default function Home({
   }
 
   if (!accountReady) {
-    return <div className="account-loading" role="status" aria-live="polite"><ForgeAmbience density={22} /><strong>FORGE</strong><span>Loading your protocol…</span></div>;
+    return <div className="account-loading" role="status" aria-live="polite"><ForgeAmbience density={14} /><strong>FORGE</strong><span>Loading your account…</span></div>;
   }
 
   if (accountLoadError) {
-    return <div className="account-loading account-error" role="alert"><ForgeAmbience density={12} /><strong>FORGE</strong><span>Your account data could not be loaded safely.</span><button onClick={() => window.location.reload()}>TRY AGAIN</button></div>;
+    return <div className="account-loading account-error" role="alert"><ForgeAmbience density={10} /><strong>FORGE</strong><span>Your account data could not be loaded safely.</span><button onClick={() => window.location.reload()}>Try again</button></div>;
   }
 
   return (
     <>
       <div className={`app-shell${launchMode ? " cinematic-underlay" : ""}`}>
-        <ForgeAmbience />
+        <ForgeAmbience density={screen === "Today" ? 24 : 16} />
         <header className="topbar">
           <button className="wordmark" onClick={() => go("Today")} aria-label="Forge home">
             <strong>FORGE</strong>
@@ -626,7 +626,7 @@ export default function Home({
             {nav.map((item) => <button key={item.name} className={screen === item.name ? "active" : ""} onClick={() => go(item.name)}><ForgeIcon name={item.icon}/><span>{item.name}</span></button>)}
           </nav>
           <div className="top-actions">
-            <button className="quick-command" onClick={() => setCommandOpen(true)} aria-label="Open quick actions"><ForgeIcon name="plus"/><span>QUICK</span></button>
+            <button className="quick-command" onClick={() => setCommandOpen(true)} aria-label="Open quick actions"><ForgeIcon name="plus"/><span>Quick</span></button>
             <button className="avatar" onClick={() => setProfileOpen(true)} aria-label="Open profile">{athleteInitial}</button>
           </div>
         </header>
@@ -686,70 +686,73 @@ export default function Home({
 
 function Today({ athleteName, exercises, meals, water, workoutStarted, lastWorkout, onStart, onCoach, onProgress }: { athleteName: string; exercises: Exercise[]; meals: Meal[]; water: number; workoutStarted: boolean; lastWorkout?: WorkoutSummary; onStart: () => void; onCoach: () => void; onProgress: () => void }) {
   const allSets = exercises.flatMap((exercise) => exercise.sets);
-  const doneSets = allSets.filter((set) => set.done).length;
+  const doneSets = allSets.filter((set) => set.done);
   const calories = meals.reduce((total, meal) => total + meal.kcal, 0);
   const protein = meals.reduce((total, meal) => total + meal.protein, 0);
-  const volume = allSets.filter((set) => set.done).reduce((total, set) => total + set.kg * set.reps, 0);
+  const volume = doneSets.reduce((total, set) => total + set.kg * set.reps, 0);
   const sessionComplete = Boolean(lastWorkout && !workoutStarted);
-  const displayVolume = sessionComplete ? lastWorkout!.volume : volume;
+  const sessionAction = sessionComplete ? "Review session" : workoutStarted ? "Resume workout" : "Start workout";
+  const nextMove = sessionComplete ? "Review what changed, then recover." : workoutStarted ? "Finish the set you are on." : "Start today’s upper-strength session.";
 
   return (
-    <div className="screen">
-      <section className="day-heading">
-        <div><p className="eyebrow">MONDAY · 27 JULY</p><h1>Good afternoon, {athleteName}.</h1><span>You&apos;re recovered and on track. One strong session closes the day.</span><div className="forge-motto"><b>FORGE THE NEXT REP</b><i/><span>Strength block 02 · Week 3</span></div></div>
-      </section>
+    <div className="screen today-screen">
+      <header className="today-intro">
+        <p className="eyebrow">Today</p>
+        <h1>Good afternoon, {athleteName}.</h1>
+        <p>{nextMove}</p>
+      </header>
 
       <div className="today-layout">
         <section className="day-flow">
           <article className={`session-focus${sessionComplete ? " complete" : ""}`}>
             <div className="session-top">
-              <div><p className="eyebrow hot">{sessionComplete ? "SESSION FORGED" : workoutStarted ? "SESSION IN PROGRESS" : "TODAY'S MAIN SESSION"}</p><h2>Upper strength</h2><span>{sessionComplete ? "Archived · Recover and refuel" : "Chest · Back · Shoulders"}</span></div>
-              <span className="duration">{sessionComplete ? formatClock(lastWorkout!.durationSeconds) : doneSets ? `${doneSets}/${allSets.length} sets` : "75–90 min"}</span>
+              <div>
+                <p className="eyebrow hot">{sessionComplete ? "Completed" : workoutStarted ? "Workout in progress" : "Your next move"}</p>
+                <h2>Upper strength</h2>
+                <span>{sessionComplete ? "Saved to your account" : "Chest · Back · Shoulders"}</span>
+              </div>
+              <span className="duration">{sessionComplete ? formatClock(lastWorkout!.durationSeconds) : workoutStarted ? `${doneSets.length}/${allSets.length} sets` : "75–90 min"}</span>
             </div>
-            <div className="session-prescription">
-              <div><small>WORKING SETS</small><strong>{allSets.length}</strong></div>
-              <div><small>VOLUME LOGGED</small><strong>{displayVolume ? `${(displayVolume / 1000).toFixed(1)}t` : "0 kg"}</strong></div>
-              <div><small>EFFORT</small><strong>{sessionComplete ? `RIR ${lastWorkout!.averageRir.toFixed(1)}` : "RIR 1–2"}</strong></div>
-            </div>
-            <div className="exercise-preview">
-              {exercises.slice(0, 3).map((item, index) => <div key={item.id}><span>0{index + 1}</span><p><strong>{item.name}</strong><small>{item.sets.length} sets · {item.cue}</small></p><b>{item.sets.at(-1)?.kg} kg</b></div>)}
-            </div>
-            <button className="primary-action" onClick={sessionComplete ? onProgress : onStart}>{sessionComplete ? "Review performance" : workoutStarted ? "Resume session" : "Start session"} <span>→</span></button>
-          </article>
 
-          <section className="schedule">
-            <header><div><p className="eyebrow">DAILY RHYTHM</p><h2>Today&apos;s flow</h2></div><span>3 of 5 complete</span></header>
-            <div className="timeline">
-              <Timeline time="06:30" title="Morning swim" detail="Easy aerobic · 35 min" state="done" />
-              <Timeline time="08:10" title="Breakfast logged" detail="640 kcal · 46g protein" state="done" />
-              <Timeline time="12:15" title="Lunch logged" detail="720 kcal · 58g protein" state="done" />
-              <Timeline time="17:00" title="Upper strength" detail={sessionComplete ? `${lastWorkout!.completedSets} sets · ${lastWorkout!.volume.toLocaleString()} kg` : "Main session · Gym"} state={sessionComplete ? "done" : "current"} />
-              <Timeline time="19:15" title="Recovery meal" detail={`${Math.max(0, 2380 - calories)} kcal remaining`} state="next" />
+            <div className="exercise-preview">
+              {exercises.slice(0, 3).map((item, index) => {
+                const completed = item.sets.filter((set) => set.done).length;
+                return <div key={item.id}><span>0{index + 1}</span><p><strong>{item.name}</strong><small>{completed}/{item.sets.length} sets logged</small></p><b>{item.sets.at(-1)?.kg} kg</b></div>;
+              })}
             </div>
-          </section>
+
+            <div className="session-evidence">
+              <span><small>Sets logged</small><strong>{sessionComplete ? lastWorkout!.completedSets : doneSets.length}</strong></span>
+              <span><small>Volume</small><strong>{sessionComplete ? lastWorkout!.volume.toLocaleString() : volume.toLocaleString()} kg</strong></span>
+              <span><small>Meals</small><strong>{meals.length}</strong></span>
+            </div>
+
+            <button className="primary-action" onClick={sessionComplete ? onProgress : onStart}>{sessionAction} <span>→</span></button>
+          </article>
         </section>
 
         <aside className="context-rail">
-          <section className="readiness-panel">
-            <header><p className="eyebrow">READINESS</p><span>Live</span></header>
-            <div className="readiness-score"><strong>92</strong><span>/100</span><i>Optimal</i></div>
-            <Signal name="Sleep" value="7h 42m" strength={84} tone="blue" />
-            <Signal name="Recovery" value="High" strength={92} tone="green" />
-            <Signal name="Stress" value="Low" strength={28} tone="amber" />
-            <p className="coach-note"><b>✦</b><span>Your pressing performance usually peaks after 7+ hours of sleep. Keep the planned load.</span></p>
+          <section className="today-records">
+            <header><p className="eyebrow">Logged today</p><span>Account data</span></header>
+            <dl>
+              <div><dt>Working sets</dt><dd>{doneSets.length} / {allSets.length}</dd></div>
+              <div><dt>Meals</dt><dd>{meals.length}</dd></div>
+              <div><dt>Energy</dt><dd>{calories.toLocaleString()} kcal</dd></div>
+              <div><dt>Protein</dt><dd>{protein} g</dd></div>
+              <div><dt>Water</dt><dd>{(water / 1000).toFixed(2)} L</dd></div>
+            </dl>
           </section>
+
           <button className="coach-command compact" onClick={onCoach}>
-            <span className="coach-mark">✦</span><p><strong>Ask Forge Coach</strong><small>Training, recovery, or fuel</small></p><i>→</i>
+            <span className="coach-mark">✦</span>
+            <p><strong>Review today</strong><small>Use only what you have logged</small></p>
+            <i>→</i>
           </button>
-          <section className="fuel-panel">
-            <header><p className="eyebrow">FUEL STATUS</p><strong>{Math.round(calories / 2380 * 100)}%</strong></header>
-            <div className="fuel-track"><i style={{ width: `${Math.min(100, calories / 2380 * 100)}%` }} /></div>
-            <div className="fuel-values"><strong>{calories.toLocaleString()} kcal</strong><span>{Math.max(0, 2380 - calories)} left</span></div>
-            <div className="macro-row">
-              <span><i className="protein" />Protein <b>{protein}g</b></span>
-              <span><i className="carbs" />Water <b>{(water / 1000).toFixed(2)}L</b></span>
-              <span><i className="fat" />Meals <b>{meals.length}</b></span>
-            </div>
+
+          <section className="today-note">
+            <p className="eyebrow">A useful reminder</p>
+            <strong>Missing data is not failure.</strong>
+            <span>Log what matters, skip what does not, and keep the next action clear.</span>
           </section>
         </aside>
       </div>
@@ -757,7 +760,16 @@ function Today({ athleteName, exercises, meals, water, workoutStarted, lastWorko
   );
 }
 
-function Train({ exercises, setExercises, started, setStarted, startedAt, setStartedAt, onFinish, notify }: {
+function Train({
+  exercises,
+  setExercises,
+  started,
+  setStarted,
+  startedAt,
+  setStartedAt,
+  onFinish,
+  notify,
+}: {
   exercises: Exercise[];
   setExercises: React.Dispatch<React.SetStateAction<Exercise[]>>;
   started: boolean;
@@ -893,13 +905,13 @@ function Train({ exercises, setExercises, started, setStarted, startedAt, setSta
 
   return (
     <div className="screen">
-      <ScreenHeading eyebrow="STRENGTH BLOCK 2 · WEEK 3" title="Training" copy="The plan, the session, and every rep—in one place." action={<span className="live-pill"><i /> {started ? `Live · ${elapsed}` : "Ready"}</span>} />
+      <ScreenHeading eyebrow="Training" title="Do the next set." copy="Your workout, set log and rest timer in one place." action={<span className="live-pill"><i /> {started ? `Live · ${elapsed}` : "Ready to start"}</span>} />
       <div className="section-tabs">{(["Session", "Week", "Library"] as TrainView[]).map((item) => <button className={view === item ? "active" : ""} onClick={() => setView(item)} key={item}>{item}</button>)}</div>
 
       {view === "Session" && <div className="training-layout">
         <section className="training-main">
           <div className="training-banner">
-            <div><p className="eyebrow hot">{started ? "SESSION LIVE" : "UPPER STRENGTH"}</p><h2>Build power. Keep control.</h2><span>{started ? `${done.length} of ${allSets.length} sets forged · ${volume.toLocaleString()} kg logged` : "Last top set: 30 kg × 7 · Target RIR 1–2"}</span></div>
+            <div><p className="eyebrow hot">{started ? "Workout in progress" : "Today’s workout"}</p><h2>Upper strength</h2><span>{started ? `${done.length} of ${allSets.length} sets logged · ${volume.toLocaleString()} kg` : `${allSets.length} working sets · target RIR 1–2`}</span></div>
             <button className="primary-action" onClick={beginSession}>{started ? `Live · ${elapsed}` : "Begin session"} <span>→</span></button>
           </div>
           <div className="exercise-accordion">
@@ -931,12 +943,12 @@ function Train({ exercises, setExercises, started, setStarted, startedAt, setSta
             })}
           </div>
           {started && done.length === allSets.length && <div className="session-finish-bar">
-            <p><span>PROTOCOL COMPLETE</span><strong>All {allSets.length} working sets logged</strong></p>
+            <p><span>Workout complete</span><strong>All {allSets.length} working sets logged</strong></p>
             <button className="finish-action" onClick={finishSession}>Finish & save <span>→</span></button>
           </div>}
         </section>
         <aside className="session-rail">
-          <p className="eyebrow">SESSION STATUS</p>
+          <p className="eyebrow">Workout status</p>
           <div className="progress-orbit" style={{ "--progress": `${progress * 3.6}deg` } as React.CSSProperties}><span><strong>{progress}%</strong><small>complete</small></span></div>
           <dl><div><dt>Working sets</dt><dd>{done.length} / {allSets.length}</dd></div><div><dt>Volume</dt><dd>{volume.toLocaleString()} kg</dd></div><div><dt>Elapsed</dt><dd>{elapsed}</dd></div></dl>
           <div className={`rest-card${restRemaining ? " active" : ""}`}>
@@ -958,16 +970,16 @@ function Train({ exercises, setExercises, started, setStarted, startedAt, setSta
       </div>}
 
       {view === "Week" && <section className="week-board">
-        <header><div><p className="eyebrow">27 JUL — 02 AUG</p><h2>Your training week</h2></div><button className="outline-action" onClick={() => setView("Session")}>Open today&apos;s session</button></header>
-        <div className="week-plan">{weekPlan.map((day) => <article className={day.status} key={day.day}><div><span>{day.day}</span><strong>{day.date}</strong></div><p><small>{day.status === "rest" ? "RECOVERY" : "TRAINING"}</small><strong>{day.title}</strong><span>{day.focus}</span></p><b>{day.duration}</b></article>)}</div>
-        <p className="program-note"><span>✦</span><b>Forge adjustment</b> Heavy leg work remains paused while your right knee returns to load. Saturday stays recovery-first.</p>
+        <header><div><p className="eyebrow">Planning preview</p><h2>Example training week</h2><span className="honesty-note">This schedule is illustrative until weekly planning is connected to your account.</span></div><button className="outline-action" onClick={() => setView("Session")}>Open today&apos;s workout</button></header>
+        <div className="week-plan">{weekPlan.map((day) => <article className={day.status} key={day.day}><div><span>{day.day}</span><strong>{day.date}</strong></div><p><small>{day.status === "rest" ? "Recovery" : "Training"}</small><strong>{day.title}</strong><span>{day.focus}</span></p><b>{day.duration}</b></article>)}</div>
+        <p className="program-note"><span>i</span><b>Safety note</b> Pain, swelling or loss of normal movement should change the plan. FORGE does not replace medical care.</p>
       </section>}
 
       {view === "Library" && <section className="library-view">
-        <header><div><p className="eyebrow">EXERCISE LIBRARY</p><h2>Find it. Add it. Train.</h2></div><label className="library-search"><span>⌕</span><input aria-label="Search exercises" value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} placeholder="Search movement or muscle…" /></label></header>
+        <header><div><p className="eyebrow">Exercise library</p><h2>Find a movement.</h2></div><label className="library-search"><span>⌕</span><input aria-label="Search exercises" value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} placeholder="Search movement or muscle…" /></label></header>
         <div className="library-grid">{visibleLibrary.map((move) => {
           const inPlan = exercises.some((exercise) => exercise.name === move.name);
-          return <article key={move.name}><span>{move.target}</span><h3>{move.name}</h3><p>{move.role}</p><b>{move.cue}</b><button aria-label={`${inPlan ? "Open" : "Add"} ${move.name}`} onClick={() => selectLibraryMove(move)}>{inPlan ? "OPEN" : "ADD"}</button></article>;
+          return <article key={move.name}><span>{move.target}</span><h3>{move.name}</h3><p>{move.role}</p><b>{move.cue}</b><button aria-label={`${inPlan ? "Open" : "Add"} ${move.name}`} onClick={() => selectLibraryMove(move)}>{inPlan ? "Open" : "Add"}</button></article>;
         })}</div>
         {!visibleLibrary.length && <div className="library-empty"><strong>No movement found.</strong><span>Try a muscle group such as chest, back, or shoulders.</span></div>}
       </section>}
@@ -1010,16 +1022,14 @@ function Fuel({ meals, setMeals, water, setWater, notify }: { meals: Meal[]; set
 
   return (
     <div className="screen">
-      <ScreenHeading eyebrow="PERFORMANCE NUTRITION" title="Fuel the work." copy="Energy, protein and hydration—at a glance." action={<button className="fuel-log-action" onClick={() => setMealOpen(true)}><ForgeIcon name="plus"/> Log meal</button>} />
+      <ScreenHeading eyebrow="Nutrition" title="Fuel" copy="Log what you eat and drink without turning it into another job." action={<button className="fuel-log-action" onClick={() => setMealOpen(true)}><ForgeIcon name="plus"/> Log meal</button>} />
 
       <section className="fuel-command">
-        <div className="energy-orbit" style={{ "--energy": `${calorieProgress * 3.6}deg` } as React.CSSProperties}>
-          <div><strong>{calorieProgress}<small>%</small></strong><span>daily fuel</span></div>
-        </div>
         <div className="energy-copy">
-          <p className="eyebrow hot">TODAY</p>
+          <p className="eyebrow hot">Logged today</p>
           <div><strong>{calories.toLocaleString()}</strong><span>kcal</span></div>
-          <p><b>{Math.max(0, calorieTarget - calories).toLocaleString()} left</b><span>/ {calorieTarget.toLocaleString()} target</span></p>
+          <p><b>{Math.max(0, calorieTarget - calories).toLocaleString()} remaining</b><span>against the current default target</span></p>
+          <i className="fuel-progress"><b style={{ width: `${calorieProgress}%` }} /></i>
         </div>
         <div className="macro-ledger">
           {[
@@ -1032,11 +1042,12 @@ function Fuel({ meals, setMeals, water, setWater, notify }: { meals: Meal[]; set
             <i><b style={{ width: `${Math.min(100, macro.current / macro.target * 100)}%` }} /></i>
           </div>)}
         </div>
+        <p className="target-note">These are current default targets, not a medical prescription. Personal target settings come later.</p>
       </section>
 
       <div className="fuel-ledger">
         <section className="meal-ledger">
-          <header><div><p className="eyebrow">MEALS</p><h2>Today&apos;s intake</h2></div><span>{meals.length} logged</span></header>
+          <header><div><p className="eyebrow">Meals</p><h2>Today&apos;s intake</h2></div><span>{meals.length} logged</span></header>
           <div className="meal-list">
             {meals.map((meal, index) => <article key={meal.id}>
               <span className="meal-index">{String(index + 1).padStart(2, "0")}</span>
@@ -1045,11 +1056,12 @@ function Fuel({ meals, setMeals, water, setWater, notify }: { meals: Meal[]; set
               <dl><div><dt>Protein</dt><dd>{meal.protein}g</dd></div><div><dt>Energy</dt><dd>{meal.kcal} kcal</dd></div></dl>
               <button aria-label={`Remove ${meal.name}`} onClick={() => setMeals((current) => current.filter((item) => item.id !== meal.id))}>×</button>
             </article>)}
+            {!meals.length && <div className="meal-empty"><strong>No meals logged yet.</strong><span>Add the next meal you actually eat.</span></div>}
           </div>
         </section>
 
         <aside className="water-ledger">
-          <header><p className="eyebrow">WATER</p><span>{waterProgress}%</span></header>
+          <header><p className="eyebrow">Water</p><span>{waterProgress}%</span></header>
           <div className="water-score"><strong>{(water / 1000).toFixed(2)}</strong><span>/ 3.20 L</span></div>
           <div className="water-gauge"><i style={{ width: `${waterProgress}%` }} /></div>
           <div className="water-actions"><button aria-label="Remove 250 ml water" onClick={() => { setWater((value) => Math.max(0, value - 250)); notify("250 ml removed."); }}>−</button><button onClick={() => { setWater((value) => Math.min(3200, value + 250)); notify("250 ml water logged."); }}>Add 250 ml</button></div>
@@ -1060,69 +1072,70 @@ function Fuel({ meals, setMeals, water, setWater, notify }: { meals: Meal[]; set
     </div>
   );
 }
-
 function Coach({ exercises, meals }: { exercises: Exercise[]; meals: Meal[] }) {
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState([{ role: "coach", text: "Readiness 92%. Giữ Upper Strength, RIR 1–2. Không cần tăng volume hôm nay." }]);
+  const [messages, setMessages] = useState([{ role: "coach", text: "I can review the sets and meals you log here. This preview uses simple rules, not a live AI coaching service." }]);
   const protein = meals.reduce((total, meal) => total + meal.protein, 0);
   const done = exercises.flatMap((exercise) => exercise.sets).filter((set) => set.done).length;
+  const totalSets = exercises.flatMap((exercise) => exercise.sets).length;
   const proteinLeft = Math.max(0, 190 - protein);
   const quick = [
-    { label: "Protect my knee", prompt: "Điều chỉnh buổi tập cho đầu gối" },
-    { label: "Plan dinner", prompt: "Tối nay tao nên ăn gì?" },
-    { label: "Review my week", prompt: "Đánh giá tiến độ tuần này" },
+    { label: "Review today", prompt: "Review what I logged today" },
+    { label: "Plan a simple dinner", prompt: "What is a simple dinner option?" },
+    { label: "Adjust for pain", prompt: "How should I adjust if a movement hurts?" },
   ];
 
   function send(text = input) {
     if (!text.trim()) return;
     const lower = text.toLowerCase();
-    let answer = "Tao đã đối chiếu tải tập, phục hồi và dinh dưỡng hôm nay. Chưa cần tăng volume; hoàn thành đúng chất lượng các set chính trước.";
-    if (lower.includes("gối")) answer = "Gối phải vẫn là guardrail chính: bỏ squat nặng, chỉ dùng ROM không đau và RPE 6–7. Hôm nay là Upper Strength nên cứ giữ lịch hiện tại.";
-    if (lower.includes("ăn")) answer = `Mày còn khoảng ${proteinLeft}g protein. Bữa tối ưu tiên cơm, ức gà hoặc cá, rau và đủ nước; không cần làm phức tạp.`;
-    if (lower.includes("tuần")) answer = "Điểm mạnh tuần này là tính đều đặn. Điểm cần khóa lại: đủ 7+ giờ ngủ và đừng đổi kỹ thuật lấy mức tạ. Giữ nhịp thêm một tuần trước khi tăng tải.";
+    let answer = `You have logged ${done} of ${totalSets} working sets and ${protein} g of protein today. Finish the next planned set with clean technique before adding more work.`;
+    if (lower.includes("dinner") || lower.includes("ăn")) answer = `The current default target leaves about ${proteinLeft} g of protein. Keep dinner simple: a protein source, rice or another carbohydrate, vegetables and water. Adjust portions to your needs.`;
+    if (lower.includes("pain") || lower.includes("hurt") || lower.includes("đau")) answer = "Stop the painful movement. Reduce load or range only if the movement becomes pain-free. New swelling, weakness or persistent pain needs qualified medical advice.";
     setMessages((current) => [...current, { role: "user", text }, { role: "coach", text: answer }]);
     setInput("");
   }
 
+  const nextMove = done ? `Continue with set ${Math.min(done + 1, totalSets)} of ${totalSets}.` : "Start with the first planned movement.";
+
   return (
-    <div className="screen coach-screen coach-v32">
-      <ScreenHeading eyebrow="FORGE COACH" title="One clear next move." copy="Ask a question or use today’s recommendation." action={<span className="coach-live-pill"><i /> CONTEXT READY</span>} />
+    <div className="screen coach-screen">
+      <ScreenHeading eyebrow="Coach" title="A second opinion, not another dashboard." copy="Ask about what you have logged today." action={<span className="coach-preview-pill">Guidance preview</span>} />
 
       <section className="coach-next-move">
-        <div><p className="eyebrow hot">TODAY&apos;S CALL</p><h2>Keep Upper Strength on plan.</h2><span>Readiness supports the work. Hold RIR 1–2 and protect clean range of motion.</span></div>
-        <button onClick={() => send("Giải thích vì sao hôm nay nên giữ buổi Upper Strength")}>Why this move? <b>→</b></button>
+        <div><p className="eyebrow hot">Next useful move</p><h2>{nextMove}</h2><span>Keep the decision small. Technique and pain-free movement come before extra load.</span></div>
+        <button onClick={() => send("Review what I logged today")}>Explain this <b>→</b></button>
       </section>
 
       <div className="coach-workspace">
         <section className="coach-chat">
           <header className="coach-chat-head">
-            <div className="forge-orb"><span>✦</span></div>
-            <div><p>FORGE COACH</p><small><i /> Tactical channel open</small></div>
-            <span className="coach-mode">SPARTAN / 01</span>
+            <div className="forge-orb"><span>F</span></div>
+            <div><p>FORGE Coach</p><small>Rule-based prototype</small></div>
           </header>
           <div className="conversation-feed">
-            {messages.map((message, index) => <div className={`chat-bubble ${message.role}`} key={index}><small>{message.role === "coach" ? "FORGE" : "YOU"}</small><p>{message.text}</p></div>)}
+            {messages.map((message, index) => <div className={`chat-bubble ${message.role}`} key={index}><small>{message.role === "coach" ? "FORGE" : "You"}</small><p>{message.text}</p></div>)}
           </div>
           <div className="coach-quick-prompts" aria-label="Suggested coach questions">
             {quick.map((item) => <button onClick={() => send(item.prompt)} key={item.label}>{item.label}</button>)}
           </div>
           <div className="coach-composer">
-            <input aria-label="Ask Forge Coach" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => event.key === "Enter" && send()} placeholder="Ask about training, recovery, or fuel…" />
+            <input aria-label="Ask Forge Coach" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => event.key === "Enter" && send()} placeholder="Ask about today’s training or food…" />
             <button aria-label="Send message" onClick={() => send()}>↑</button>
           </div>
         </section>
 
         <aside className="coach-intel">
-          <header><p>TODAY&apos;S SIGNALS</p><span>LIVE</span></header>
-          <div className="signal-grid">
-            <article><small>WORK DONE</small><strong>{done}<em> sets</em></strong></article>
-            <article><small>PROTEIN LEFT</small><strong>{proteinLeft}<em> g</em></strong></article>
-          </div>
+          <header><p>What this preview can see</p><span>Today</span></header>
+          <dl className="coach-facts">
+            <div><dt>Sets logged</dt><dd>{done} / {totalSets}</dd></div>
+            <div><dt>Meals logged</dt><dd>{meals.length}</dd></div>
+            <div><dt>Protein logged</dt><dd>{protein} g</dd></div>
+          </dl>
           <div className="coach-guardrail">
             <span>!</span>
-              <div><small>ACTIVE GUARDRAIL</small><strong>Protect right knee</strong><p>Pain-free ROM · no heavy squat</p></div>
+            <div><small>Safety boundary</small><strong>Pain changes the plan</strong><p>FORGE cannot diagnose injury or replace medical care.</p></div>
           </div>
-          <p className="coach-intel-note">Forge uses today&apos;s logged work and meals. Better inputs create better decisions.</p>
+          <p className="coach-intel-note">This prototype does not call a production AI model. Its answers are intentionally limited and based only on the records shown here.</p>
         </aside>
       </div>
     </div>
@@ -1148,10 +1161,10 @@ function Progress({ exercises, history, workoutStarted, onTrain }: { exercises: 
   if (!history.length) {
     return (
       <div className="screen">
-        <ScreenHeading eyebrow="PERFORMANCE REVIEW" title="Progress starts with one session." copy="Forge only shows what you have actually logged." />
+        <ScreenHeading eyebrow="Progress" title="Progress starts with one saved workout." copy="Only completed account records appear here." />
         <section className="progress-empty">
           <span>01</span>
-          <div><p className="eyebrow hot">{workoutStarted ? "SESSION IN PROGRESS" : "NO COMPLETED SESSIONS YET"}</p><h2>{workoutStarted ? "Finish today’s work to create your baseline." : "Build the first real data point."}</h2><p>{workoutStarted && currentVolume ? `${currentVolume.toLocaleString()} kg logged so far. Save the session and Forge will turn it into a real trend.` : "Complete and save a workout. Volume, effort and best sets will appear here automatically."}</p></div>
+          <div><p className="eyebrow hot">{workoutStarted ? "Workout in progress" : "No completed workouts yet"}</p><h2>{workoutStarted ? "Finish today’s workout to create your baseline." : "Create the first real data point."}</h2><p>{workoutStarted && currentVolume ? `${currentVolume.toLocaleString()} kg logged so far. Save the workout to add it to your history.` : "Complete and save a workout. Volume, effort and best sets will appear here automatically."}</p></div>
           <button className="primary-action" onClick={onTrain}>{workoutStarted ? "Resume session" : "Open training"} <b>→</b></button>
         </section>
       </div>
@@ -1160,14 +1173,14 @@ function Progress({ exercises, history, workoutStarted, onTrain }: { exercises: 
 
   return (
     <div className="screen">
-      <ScreenHeading eyebrow="PERFORMANCE REVIEW" title="Progress you can prove." copy="Only completed sessions. No placeholder metrics." action={<div className="range-switch">{["4W", "12W", "6M"].map((item) => <button className={range === item ? "active" : ""} onClick={() => setRange(item)} key={item}>{item}</button>)}</div>} />
+      <ScreenHeading eyebrow="Progress" title="What the work changed." copy="Completed workouts only—no placeholder metrics." action={<div className="range-switch">{["4W", "12W", "6M"].map((item) => <button className={range === item ? "active" : ""} onClick={() => setRange(item)} key={item}>{item}</button>)}</div>} />
       <section className="progress-overview">
         <div><p className="eyebrow">SESSIONS</p><strong>{filteredHistory.length}</strong><span>completed in {range}</span></div>
         <div><p className="eyebrow">TOTAL VOLUME</p><strong>{(totalVolume / 1000).toFixed(1)}<small> t</small></strong><span>from saved working sets</span></div>
         <div><p className="eyebrow">AVERAGE EFFORT</p><strong>{averageRir.toFixed(1)}<small> RIR</small></strong><span>across completed sessions</span></div>
       </section>
       <section className="latest-forge">
-        <div><p className="eyebrow hot">LATEST SESSION</p><h2>{latest.title}</h2><span>{latest.bestSet}</span></div>
+        <div><p className="eyebrow hot">Latest workout</p><h2>{latest.title}</h2><span>{latest.bestSet}</span></div>
         <dl>
           <div><dt>Volume</dt><dd>{latest.volume.toLocaleString()} kg</dd></div>
           <div><dt>Duration</dt><dd>{formatClock(latest.durationSeconds)}</dd></div>
@@ -1175,33 +1188,25 @@ function Progress({ exercises, history, workoutStarted, onTrain }: { exercises: 
         </dl>
       </section>
       <section className="performance-chart">
-        <header><div><p className="eyebrow">SESSION VOLUME</p><h2>Real work, session by session.</h2></div><span>{range} · {chartSessions.length} logged</span></header>
+        <header><div><p className="eyebrow">Workout volume</p><h2>Saved work, workout by workout.</h2></div><span>{range} · {chartSessions.length} logged</span></header>
         {chartSessions.length ? <div className="bars real-bars">{chartSessions.map((session, index) => <div key={session.id} title={`${session.volume.toLocaleString()} kg`}><i style={{ height: `${Math.max(12, session.volume / maxVolume * 100)}%` }} className={index === chartSessions.length - 1 ? "hot" : ""} /><small>{new Date(session.completedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}</small></div>)}</div> : <p className="range-empty">No completed sessions in this range.</p>}
       </section>
       <div className="progress-lower">
         <section className="recent-sessions">
-          <header><p className="eyebrow">RECENT SESSIONS</p><span>{history.length} total</span></header>
+          <header><p className="eyebrow">Recent workouts</p><span>{history.length} total</span></header>
           {workoutStarted && <div><time>Today</time><strong>Upper strength</strong><span>{currentVolume ? `${currentVolume.toLocaleString()} kg` : "In progress"}</span><b>LIVE</b></div>}
           {history.slice(0, 4).map((session) => <div key={session.id}><time>{new Date(session.completedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}</time><strong>{session.title}</strong><span>{session.volume.toLocaleString()} kg</span><b>{session.completedSets}/{session.totalSets}</b></div>)}
         </section>
         <section className="progress-insight">
-          <p className="eyebrow">NEXT REVIEW</p>
+          <p className="eyebrow">Next review</p>
           <span>✦</span>
           <h2>Earn the trend.</h2>
           <p>{trendCopy}</p>
-          <small>Forge will not recommend progression from a single good day.</small>
+          <small>FORGE will not recommend progression from a single good day.</small>
         </section>
       </div>
     </div>
   );
-}
-
-function Timeline({ time, title, detail, state }: { time: string; title: string; detail: string; state: string }) {
-  return <div className={`timeline-item ${state}`}><time>{time}</time><i>{state === "done" ? "✓" : ""}</i><p><strong>{title}</strong><span>{detail}</span></p>{state === "current" && <b>Up next</b>}</div>;
-}
-
-function Signal({ name, value, strength, tone }: { name: string; value: string; strength: number; tone: string }) {
-  return <div className="signal"><p><span>{name}</span><strong>{value}</strong></p><i><b className={tone} style={{ width: `${Math.min(100, strength)}%` }} /></i></div>;
 }
 
 function ScreenHeading({ eyebrow, title, copy, action }: { eyebrow: string; title: string; copy: string; action?: React.ReactNode }) {
@@ -1211,8 +1216,8 @@ function ScreenHeading({ eyebrow, title, copy, action }: { eyebrow: string; titl
 function CommandPalette({ onClose, go, startWorkout, addWater }: { onClose: () => void; go: (screen: Screen) => void; startWorkout: () => void; addWater: () => void }) {
   return <div className="modal-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <section className="command-palette" role="dialog" aria-modal="true" aria-label="Quick actions">
-      <header className="quick-actions-head"><div><p>QUICK ACTIONS</p><strong>What do you need right now?</strong></div><button onClick={onClose} aria-label="Close quick actions">×</button></header>
-      <p>ONE TAP. BACK TO THE WORK.</p>
+      <header className="quick-actions-head"><div><p>Quick actions</p><strong>What do you need right now?</strong></div><button onClick={onClose} aria-label="Close quick actions">×</button></header>
+      <p>Choose one action.</p>
       <button onClick={startWorkout}><i>Ⅱ</i><span><strong>Start today&apos;s workout</strong><small>Upper strength · 13 working sets</small></span><b>→</b></button>
       <button onClick={addWater}><i>◒</i><span><strong>Log 250 ml water</strong><small>Add to today&apos;s hydration</small></span><b>+</b></button>
       <button onClick={() => go("Fuel")}><i>+</i><span><strong>Log a meal</strong><small>Calories, protein and meal details</small></span><b>→</b></button>
@@ -1235,8 +1240,8 @@ function MealDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (meal: Omi
   }
   return <div className="modal-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <form className="meal-dialog" onSubmit={submit}>
-      <header><div><p className="eyebrow hot">NUTRITION LOG</p><h2>Add a meal</h2></div><button type="button" onClick={onClose}>×</button></header>
-      <div className="meal-presets"><span>QUICK FILL</span><div>{presets.map((preset) => <button type="button" onClick={() => setDraft((current) => ({ ...current, name: preset.name, detail: preset.detail, kcal: preset.kcal, protein: preset.protein }))} key={preset.label}>{preset.label}</button>)}</div></div>
+      <header><div><p className="eyebrow hot">Nutrition log</p><h2>Add a meal</h2></div><button type="button" onClick={onClose}>×</button></header>
+      <div className="meal-presets"><span>Quick fill</span><div>{presets.map((preset) => <button type="button" onClick={() => setDraft((current) => ({ ...current, name: preset.name, detail: preset.detail, kcal: preset.kcal, protein: preset.protein }))} key={preset.label}>{preset.label}</button>)}</div></div>
       <label>Meal name<input name="name" value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Recovery dinner" required /></label>
       <label>Food details <small>optional</small><input name="detail" value={draft.detail} onChange={(event) => setDraft((current) => ({ ...current, detail: event.target.value }))} placeholder="Rice · chicken · greens" /></label>
       <div><label>Time<input name="time" type="time" value={draft.time} onChange={(event) => setDraft((current) => ({ ...current, time: event.target.value }))} required /></label><label>Calories<input name="kcal" type="number" min="0" value={draft.kcal || ""} onChange={(event) => setDraft((current) => ({ ...current, kcal: Number(event.target.value) }))} required /></label><label>Protein (g)<input name="protein" type="number" min="0" value={draft.protein || ""} onChange={(event) => setDraft((current) => ({ ...current, protein: Number(event.target.value) }))} required /></label></div>
@@ -1266,13 +1271,13 @@ function ProfileDrawer({
   return <div className="drawer-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
     <aside className="profile-drawer">
       <header><div><span>{displayName.slice(0, 1).toUpperCase()}</span><p><strong>{displayName}</strong><small>{email || "Signed-in athlete"}</small></p></div><button onClick={onClose}>×</button></header>
-      <section className="account-profile"><p className="eyebrow">ATHLETE PROFILE</p><label>DISPLAY NAME<input value={draft.displayName} maxLength={80} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="How Forge should address you" /></label><dl><div><dt>Account</dt><dd>Protected</dd></div><div><dt>Plan</dt><dd>Free</dd></div><div><dt>Data</dt><dd>Account synced</dd></div></dl></section>
-      <section><p className="eyebrow">COACH GUARDRAILS</p><ul><li>Protect right knee during return to load.</li><li>Progress only with clean ROM and control.</li><li>Prioritize chest, back, calves and forearms.</li></ul></section>
-      <section><p className="eyebrow">PREFERENCES</p><div className="preference"><span>Units</span><div>{(["Metric", "Imperial"] as const).map((item) => <button className={draft.units === item ? "active" : ""} onClick={() => setDraft((current) => ({ ...current, units: item }))} key={item}>{item}</button>)}</div></div><div className="preference"><span>Session reminders</span><button className={`toggle ${draft.notifications ? "on" : ""}`} onClick={() => setDraft((current) => ({ ...current, notifications: !current.notifications }))}><i /></button></div></section>
+      <section className="account-profile"><p className="eyebrow">Athlete profile</p><label>Display name<input value={draft.displayName} maxLength={80} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="How FORGE should address you" /></label><dl><div><dt>Account</dt><dd>Protected</dd></div><div><dt>Plan</dt><dd>Free</dd></div><div><dt>Data</dt><dd>Account synced</dd></div></dl></section>
+      <section><p className="eyebrow">Safety preferences</p><ul><li>Stop or adjust movements that cause pain.</li><li>Progress only with clean range of motion and control.</li><li>Review persistent symptoms with a qualified professional.</li></ul></section>
+      <section><p className="eyebrow">Preferences</p><div className="preference"><span>Units</span><div>{(["Metric", "Imperial"] as const).map((item) => <button className={draft.units === item ? "active" : ""} onClick={() => setDraft((current) => ({ ...current, units: item }))} key={item}>{item}</button>)}</div></div><div className="preference"><span>Session reminders</span><button className={`toggle ${draft.notifications ? "on" : ""}`} onClick={() => setDraft((current) => ({ ...current, notifications: !current.notifications }))}><i /></button></div></section>
       <section className="demo-tools">
-        <p className="eyebrow">ACCOUNT</p>
-        <button onClick={onReplayLogin}><span><b>REPLAY WELCOME</b><small>Replay the short cinematic</small></span><i>↗</i></button>
-        <button onClick={onReplayOnboarding}><span><b>RECALIBRATE PLAN</b><small>Review the three setup choices</small></span><i>→</i></button>
+        <p className="eyebrow">Account</p>
+        <button onClick={onReplayLogin}><span><b>Replay welcome</b><small>Replay the short cinematic</small></span><i>↗</i></button>
+        <button onClick={onReplayOnboarding}><span><b>Review setup</b><small>Review the three setup choices</small></span><i>→</i></button>
         <a href="/signout-with-chatgpt?return_to=%2F"><span><b>SIGN OUT</b><small>Securely end this session</small></span><i>→</i></a>
       </section>
       <button className="outline-action drawer-save" disabled={!draft.displayName.trim()} onClick={() => onSave({ ...draft, displayName: draft.displayName.trim() })}>Save preferences</button>
