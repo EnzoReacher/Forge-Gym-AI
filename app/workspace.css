@@ -4,8 +4,8 @@
   --surface:#0c0c0b;
   --raised:#11100f;
   --ink:#eee9e1;
-  --muted:#918a82;
-  --dim:#68625c;
+  --muted:#a29a91;
+  --dim:#7f7770;
   --line:rgba(205,190,171,.14);
   --line-strong:rgba(205,190,171,.25);
   --red:#d8442f;
@@ -328,6 +328,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .exercise-summary>i{color:var(--dim);font-style:normal;transition:transform .2s ease}
 .exercise-block.open .exercise-summary>i{transform:rotate(180deg)}
 .set-editor{margin:0;padding:0 0 22px 59px;border:0;background:transparent}
+.field-help{margin:0;padding:10px 0;color:var(--muted);font-size:12px;line-height:1.5}
 .set-head,.set-row{
   display:grid;
   grid-template-columns:32px minmax(80px,.9fr) minmax(76px,.8fr) 68px 94px;
@@ -337,7 +338,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .set-head{min-height:34px;color:var(--dim);font-size:9px}
 .set-row{min-height:56px;border-top:1px solid var(--line)}
 .set-row>span{color:var(--dim);font-size:12px}
-.set-input,.rir-input{position:relative;height:40px;border:1px solid var(--line);border-radius:0;background:#090908;display:grid;align-items:center}
+.set-input,.rir-input{position:relative;height:44px;border:1px solid var(--line);border-radius:0;background:#090908;display:grid;align-items:center}
 .set-input:focus-within,.rir-input:focus-within{border-color:var(--red)}
 .set-input input,.rir-input select{
   width:100%;
@@ -350,7 +351,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
   appearance:textfield;
 }
 .set-input span,.rir-input span{position:absolute;right:8px;color:var(--dim);font-size:9px;pointer-events:none}
-.set-log-button{min-height:40px;border:1px solid var(--line-strong);border-radius:0;background:transparent;cursor:pointer;font-size:11px}
+.set-log-button{min-height:44px;border:1px solid var(--line-strong);border-radius:0;background:transparent;cursor:pointer;font-size:12px}
 .set-row.done .set-log-button{border-color:rgba(104,168,120,.5);color:#8fca9d}
 .set-row.done{opacity:.68}
 .session-rail{min-width:0;padding:5px 0 0;border:0;background:transparent}
@@ -380,9 +381,9 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .rest-card>strong{margin-top:6px;font-size:28px;font-variant-numeric:tabular-nums}
 .rest-card.active>strong{color:#f06a50}
 .rest-actions{margin-top:12px;display:flex;gap:8px}
-.rest-actions button,.end-session-link{min-height:38px;padding:0 11px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer;font-size:10px}
+.rest-actions button,.end-session-link{min-height:44px;padding:0 12px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer;font-size:12px}
 .session-note{margin-top:20px}
-.session-note summary{min-height:40px;color:var(--muted);font-size:11px;cursor:pointer;display:flex;align-items:center}
+.session-note summary{min-height:44px;color:var(--muted);font-size:12px;cursor:pointer;display:flex;align-items:center}
 .session-note textarea{width:100%;min-height:86px;padding:11px;border:1px solid var(--line);background:#090908;color:var(--ink);resize:vertical}
 .coach-note{padding:18px 0;border:0;border-top:1px solid var(--line);border-radius:0;background:transparent;color:var(--muted);font-size:11px;line-height:1.55;display:flex;gap:10px}
 .coach-note b{color:var(--red)}
@@ -425,7 +426,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .library-grid h3{margin:22px 0 7px;font-size:19px}
 .library-grid p{margin:0;color:var(--muted);font-size:12px}
 .library-grid article>b{margin-top:18px;color:var(--dim);font-size:10px;display:block}
-.library-grid article>button{position:absolute;right:20px;bottom:20px;min-height:38px;padding:0 14px;border:1px solid var(--line-strong);border-radius:0;background:transparent;cursor:pointer}
+.library-grid article>button{position:absolute;right:20px;bottom:20px;min-height:44px;padding:0 14px;border:1px solid var(--line-strong);border-radius:0;background:transparent;cursor:pointer}
 .library-empty,.meal-empty{padding:28px 0;border-bottom:1px solid var(--line)}
 .library-empty strong,.library-empty span,.meal-empty strong,.meal-empty span{display:block}
 .library-empty span,.meal-empty span{margin-top:7px;color:var(--muted);font-size:12px}
@@ -461,7 +462,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .fuel-ledger{padding-top:38px;display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:clamp(28px,4vw,56px)}
 .meal-ledger{border:0;background:transparent}
 .meal-ledger>header>span{color:var(--dim);font-size:11px}
-.meal-list article{min-height:80px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:34px 56px minmax(0,1fr) 176px 36px;gap:12px;align-items:center}
+.meal-list article{min-height:80px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:34px 56px minmax(0,1fr) 176px 44px;gap:12px;align-items:center}
 .meal-index{color:var(--bronze);font-size:10px}
 .meal-list time{color:var(--muted);font-size:11px}
 .meal-list article>p,.meal-list article>p strong,.meal-list article>p span{margin:0;display:block}
@@ -471,7 +472,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .meal-list dl div{text-align:right}
 .meal-list dt{color:var(--dim);font-size:9px}
 .meal-list dd{margin:4px 0 0;font-size:11px}
-.meal-list article>button{width:34px;height:34px;border:0;background:transparent;color:var(--dim);cursor:pointer;font-size:19px}
+.meal-list article>button{width:44px;height:44px;border:0;background:transparent;color:var(--dim);cursor:pointer;font-size:19px}
 .water-ledger{padding:17px 0 0;border:0;border-radius:0;background:transparent}
 .water-ledger>header{display:flex;justify-content:space-between}
 .water-ledger>header>span{color:var(--bronze);font-size:11px}
@@ -505,7 +506,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .chat-bubble.user small{color:var(--muted)}
 .chat-bubble p,.coach-chat .chat-bubble p{margin:7px 0 0;padding:0;border:0;background:transparent;color:#d9d2c9;font-size:13px;line-height:1.65}
 .coach-quick-prompts{padding:12px 0;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px}
-.coach-quick-prompts button{min-height:38px;padding:0 13px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer;font-size:10px}
+.coach-quick-prompts button{min-height:44px;padding:0 13px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer;font-size:12px}
 .coach-composer{min-height:64px;margin:0;padding:0;border:0;border-top:1px solid var(--line);border-radius:0;background:transparent;display:grid;grid-template-columns:1fr 48px;gap:10px;align-items:center}
 .coach-composer input{width:100%;height:46px;padding:0 12px;border:0;outline:0;background:transparent;color:var(--ink)}
 .coach-composer button{width:44px;height:44px;border:1px solid var(--red);border-radius:0;background:var(--red);cursor:pointer}
@@ -527,7 +528,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 
 /* Progress */
 .range-switch{border:1px solid var(--line);border-radius:0;background:transparent;display:flex}
-.range-switch button{min-width:48px;min-height:38px;border:0;border-right:1px solid var(--line);background:transparent;color:var(--dim);cursor:pointer;font-size:10px}
+.range-switch button{min-width:48px;min-height:44px;border:0;border-right:1px solid var(--line);background:transparent;color:var(--dim);cursor:pointer;font-size:12px}
 .range-switch button:last-child{border-right:0}
 .range-switch button.active{background:var(--raised);color:var(--ink)}
 .progress-empty{min-height:380px;padding:48px 0;border:0;border-bottom:1px solid var(--line-strong);border-radius:0;background:transparent;display:grid;grid-template-columns:90px minmax(0,1fr) auto;gap:30px;align-items:center}
@@ -593,7 +594,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .quick-actions-head,.meal-dialog>header,.profile-drawer>header{display:flex;justify-content:space-between;align-items:center;gap:20px}
 .quick-actions-head p{margin:0;color:var(--bronze);font-size:10px}
 .quick-actions-head strong{margin-top:5px;font-size:20px;display:block}
-.quick-actions-head button,.meal-dialog>header button,.profile-drawer>header button{width:42px;height:42px;border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:22px}
+.quick-actions-head button,.meal-dialog>header button,.profile-drawer>header button{width:44px;height:44px;border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:22px}
 .command-palette>p{margin:18px 0 8px;color:var(--dim);font-size:10px}
 .command-palette>button:not(.quick-actions-head button){
   width:100%;
@@ -620,7 +621,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .meal-presets{padding:18px 0;border-bottom:1px solid var(--line)}
 .meal-presets>span{color:var(--dim);font-size:10px}
 .meal-presets>div{margin-top:10px;display:flex;gap:8px}
-.meal-presets button{min-height:38px;padding:0 12px;border:1px solid var(--line);background:transparent;cursor:pointer;font-size:10px}
+.meal-presets button{min-height:44px;padding:0 12px;border:1px solid var(--line);background:transparent;cursor:pointer;font-size:12px}
 .meal-dialog>label,.meal-dialog>div:not(.meal-presets)>label{margin-top:16px;color:var(--muted);font-size:11px;display:block}
 .meal-dialog label small{color:var(--dim)}
 .meal-dialog input{width:100%;height:44px;margin-top:7px;padding:0 11px;border:1px solid var(--line);background:#080807;color:var(--ink);outline:0}
@@ -644,11 +645,11 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .preference{min-height:48px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:16px}
 .preference>span{color:var(--muted);font-size:11px}
 .preference>div{display:flex}
-.preference>div button{min-height:34px;padding:0 11px;border:1px solid var(--line);background:transparent;color:var(--dim);cursor:pointer;font-size:10px}
+.preference>div button{min-height:44px;padding:0 11px;border:1px solid var(--line);background:transparent;color:var(--dim);cursor:pointer;font-size:12px}
 .preference>div button.active{color:var(--ink);border-color:var(--line-strong)}
-.toggle{position:relative;width:44px;height:24px;padding:0;border:1px solid var(--line);border-radius:20px;background:#080807;cursor:pointer}
-.toggle i{position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:var(--dim);transition:transform .2s ease}
-.toggle.on i{transform:translateX(20px);background:var(--green)}
+.toggle{position:relative;width:52px;height:44px;padding:0;border:1px solid var(--line);border-radius:24px;background:#080807;cursor:pointer}
+.toggle i{position:absolute;top:11px;left:5px;width:20px;height:20px;border-radius:50%;background:var(--dim);transition:transform .2s ease}
+.toggle.on i{transform:translateX(21px);background:var(--green)}
 .demo-tools>button,.demo-tools>a{width:100%;min-height:58px;padding:0;border:0;border-top:1px solid var(--line);background:transparent;color:var(--ink);text-decoration:none;display:flex;align-items:center;justify-content:space-between;cursor:pointer;text-align:left}
 .demo-tools span b,.demo-tools span small{display:block}
 .demo-tools span b{font-size:11px}
@@ -718,7 +719,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
   .top-actions{grid-column:2}
   .quick-command{width:44px;padding:0;justify-content:center}
   .quick-command span{display:none}
-  .avatar{width:42px;min-height:42px}
+  .avatar{width:44px;min-height:44px}
   .workspace{padding:32px 18px 100px}
   .mobile-dock{
     position:fixed;
@@ -765,7 +766,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
   .set-editor{padding:0 0 20px;overflow:visible}
   .set-head{display:none}
   .set-row{min-height:76px;grid-template-columns:22px minmax(62px,1fr) minmax(62px,1fr) 58px;gap:6px}
-  .set-row .set-log-button{grid-column:2/-1;min-height:40px}
+  .set-row .set-log-button{grid-column:2/-1;min-height:44px}
   .set-input input,.rir-input select{padding:0 22px 0 7px}
   .set-input span,.rir-input span{right:5px;font-size:7px}
   .session-rail{display:block}
@@ -782,7 +783,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
   .macro-ledger{grid-template-columns:1fr}
   .macro-ledger>div{border-right:0;border-bottom:1px solid var(--line)}
   .macro-ledger>div:last-child{border-bottom:0}
-  .meal-list article{min-height:92px;grid-template-columns:26px 48px minmax(0,1fr) 32px}
+  .meal-list article{min-height:92px;grid-template-columns:26px 48px minmax(0,1fr) 44px}
   .meal-list dl{display:none}
   .water-ledger{display:block}
   .coach-next-move{align-items:flex-start;flex-direction:column}
@@ -817,6 +818,34 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
   .completion-actions button{width:100%}
   .toast,.sync-warning{bottom:84px}
   .sync-warning{bottom:128px}
+}
+@media (max-width:380px){
+  .topbar{padding-inline:14px}
+  .workspace{padding:28px 14px calc(96px + env(safe-area-inset-bottom))}
+  .screen-heading h1,.today-intro h1{font-size:clamp(34px,11vw,46px)}
+  .section-tabs{gap:18px}
+  .section-tabs button{min-width:64px}
+  .exercise-summary{grid-template-columns:26px minmax(0,1fr) auto 14px}
+  .set-row{grid-template-columns:20px minmax(58px,1fr) minmax(58px,1fr) 52px;gap:5px}
+  .set-input input,.rir-input select{font-size:14px}
+  .meal-list article{grid-template-columns:40px minmax(0,1fr) 44px}
+  .meal-list .meal-index{display:none}
+  .meal-list time{font-size:10px}
+  .mobile-dock{padding-inline:2px}
+  .mobile-dock button span{font-size:9px}
+}
+@media (prefers-contrast:more){
+  :root{
+    --muted:#bdb5ab;
+    --dim:#a69e95;
+    --line:rgba(238,233,225,.32);
+    --line-strong:rgba(238,233,225,.54);
+  }
+}
+@media (forced-colors:active){
+  button,[role="button"],input,select,textarea,.session-focus,.progress-orbit,.command-palette,.meal-dialog,.profile-drawer{forced-color-adjust:auto}
+  .desktop-nav button.active::after,.section-tabs button.active::after{background:Highlight}
+  .spark-field,.hammer-flash,.forge-haze{display:none!important}
 }
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
