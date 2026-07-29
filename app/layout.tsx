@@ -1,14 +1,15 @@
 import type { Metadata } from "next";
 import { Outfit } from "next/font/google";
 import "./globals.css";
+import "./workspace.css";
 const outfit=Outfit({variable:"--sans",subsets:["latin"],display:"swap"});
 export const metadata:Metadata={
   title:"Forge Gym AI",
-  description:"A warrior-built command center for training, recovery and nutrition.",
+  description:"Clear training, nutrition, recovery and progress guidance—built to stay out of your way.",
   icons:{
-    icon:"/viking-forge-logo.png",
-    shortcut:"/viking-forge-logo.png",
-    apple:"/viking-forge-logo.png"
+    icon:"/favicon.svg",
+    shortcut:"/favicon.svg",
+    apple:"/favicon.svg"
   },
   other:{"codex-preview":"development"}
 };
