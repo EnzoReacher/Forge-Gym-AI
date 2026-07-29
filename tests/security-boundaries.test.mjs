@@ -19,9 +19,20 @@ test("account state is always scoped to the authenticated owner", async () => {
   const route = await source("app/api/state/route.ts");
 
   assert.match(route, /getChatGPTUser\(\)/);
-  assert.match(route, /eq\(userData\.userId,\s*auth\.account\.id\)/);
-  assert.match(route, /userId:\s*auth\.account\.id/);
+  assert.match(route, /loadAccountState\([\s\S]*auth\.account\.id/);
+  assert.match(route, /saveAccountState\([\s\S]*auth\.account\.id/);
+  assert.match(route, /eq\(userData\.userId,\s*ownerId\)/);
+  assert.match(route, /userId:\s*ownerId/);
   assert.doesNotMatch(route, /payload\.userId/);
+});
+
+test("account API failures emit fixed-shape operational telemetry", async () => {
+  const route = await source("app/api/state/route.ts");
+  const telemetry = await source("app/operational-events.mjs");
+
+  assert.match(route, /observeApiRequest/);
+  assert.match(telemetry, /User identity, state values, request bodies/);
+  assert.doesNotMatch(telemetry, /email|payload|request\.url/);
 });
 
 test("the primary sign-in screen never collects a password", async () => {

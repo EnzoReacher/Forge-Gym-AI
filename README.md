@@ -24,20 +24,25 @@ security, data, billing, admin, or architecture decisions.
 
 ## Current status
 
-FORGE is currently a front-end product prototype. It demonstrates:
+FORGE is currently an owner-only authenticated product prototype. It includes:
 
 - Landing, login, and onboarding journeys.
 - A short cinematic transition after successful entry.
 - Today dashboard and workout logging interactions.
 - Fuel and hydration tracking interactions.
 - Coach guidance and chat interface.
-- Progress views based on completed local sessions.
+- Progress views based on completed sessions.
 - A responsive Spartan-inspired visual system with reduced-motion support.
+- ChatGPT-managed sign-in for the protected app route.
+- D1-backed account state scoped to the authenticated user.
+- Server-owned account role, status, and plan foundations.
+- Input validation, account isolation tests, and privacy-safe operational
+  telemetry for account state.
 
-Some state is still device-local or demonstrative. Real multi-user accounts,
-durable user data, payments, administrator operations, and production AI
-services must not be represented as complete until their server-side
-implementations and security controls exist.
+Some metrics and product areas remain demonstrative, and the current JSON state
+store is an intermediate model. Public multi-user access, payments,
+administrator operations, and production AI services must not be represented as
+complete until their release gates and security controls pass.
 
 ## Technology
 
@@ -101,16 +106,16 @@ runtime caches, or local environment files.
 
 ## Data and authentication
 
-The repository includes foundations for D1, Drizzle, and ChatGPT-managed
-identity, but the current product must still be treated as a prototype until
-real account-owned records and server-enforced authorization are implemented.
+The protected app uses ChatGPT-managed identity and D1-backed account state.
+Every state read and write derives the owner from the authenticated server
+identity; the client cannot choose an owner ID.
 
-Before storing important user data:
+Before widening access:
 
-1. Add real authentication and durable per-user storage.
-2. Enforce authorization for every protected action and record.
-3. Test user isolation explicitly.
-4. Add audit logging, monitoring, encrypted backups, and restoration tests.
+1. Run the deployed two-account isolation matrix.
+2. Test sign-in, sign-out, expired sessions, suspension, and recovery.
+3. Configure monitored alerts and automated encrypted backups.
+4. Complete a recorded restoration drill.
 5. Add privacy controls for access, correction, export, and deletion.
 
 Never commit passwords, access tokens, private keys, payment credentials, or
@@ -118,13 +123,20 @@ production environment values.
 
 ## Planned delivery order
 
-1. Keep the core web journey simple and genuinely useful.
-2. Add secure accounts and durable user-owned data.
+1. Prove deployed authentication and two-account isolation.
+2. Complete the FORGE / Raw Steel design reset so the interface is distinctive,
+   restrained, and easy to understand rather than AI-template-like.
 3. Make Train, Fuel, Coach, and Progress operate on real records.
-4. Add monitoring, backups, audit logs, privacy operations, and support tools.
+4. Add monitoring, backups, restore drills, privacy operations, and support
+   tools.
 5. Build the first protected Admin Control Center.
 6. Add secure billing and clearly differentiated Free and paid plans.
 7. Move toward mobile using shared product logic and validated user demand.
+
+The active milestone checklist is in
+[docs/product/roadmap.md](./docs/product/roadmap.md). Backup and recovery rules
+are in
+[docs/operations/backup-restore.md](./docs/operations/backup-restore.md).
 
 Paid plans should add meaningful personalization, depth, automation, capacity,
 and support. Security, accessibility, essential safety guidance, privacy,

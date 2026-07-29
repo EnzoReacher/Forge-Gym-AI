@@ -68,6 +68,14 @@ make the interface aggressive, confusing, crowded, or difficult to approach.
    A new feature is not automatically an improvement. Prefer improving the core
    journey before adding another dashboard, metric, tab, or setting.
 
+9. **Recognizable product language, not template effects**
+   FORGE must not look like a generic dark AI dashboard. Do not use cards,
+   gradients, glow, uppercase labels, cinematic words, or decorative metrics by
+   default. Build one coherent visual system, remove superseded CSS instead of
+   stacking theme overrides, and reserve warrior language for moments where it
+   strengthens meaning. The active visual-reset requirements live in
+   `docs/product/roadmap.md`.
+
 ## Long-term foundations
 
 FORGE will grow beyond the current web prototype. Every major technical

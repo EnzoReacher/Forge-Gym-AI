@@ -2,6 +2,12 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { userData, users } from "../../../db/schema";
 import { getChatGPTUser } from "../../chatgpt-auth";
+import { observeApiRequest } from "../../operational-events.mjs";
+import {
+  CorruptSavedStateError,
+  loadAccountState,
+  saveAccountState,
+} from "./service.mjs";
 
 const ALLOWED_KEYS = new Set([
   "forge-exercises",
@@ -173,7 +179,9 @@ function validValue(key: string, value: unknown) {
 }
 
 export async function GET(request: Request) {
-  try {
+  return observeApiRequest(
+    "account_state_read",
+    async () => {
     const key = normalizedKey(request);
     if (!key) return json({ error: "Unsupported state key." }, 400);
 
@@ -181,24 +189,34 @@ export async function GET(request: Request) {
     if ("response" in auth) return auth.response;
 
     const db = await getDb();
-    const row = await db.query.userData.findFirst({
-      where: and(eq(userData.userId, auth.account.id), eq(userData.key, key)),
-    });
-
-    if (!row) return json({ value: null });
-
     try {
-      return json({ value: JSON.parse(row.valueJson) });
-    } catch {
+      const value = await loadAccountState(
+        {
+          findForOwner: (ownerId, stateKey) =>
+            db.query.userData.findFirst({
+              where: and(
+                eq(userData.userId, ownerId),
+                eq(userData.key, stateKey),
+              ),
+            }),
+        },
+        auth.account.id,
+        key,
+      );
+      return json({ value });
+    } catch (error) {
+      if (!(error instanceof CorruptSavedStateError)) throw error;
       return json({ error: "Saved state is unavailable." }, 500);
     }
-  } catch {
-    return json({ error: "Unable to load account data." }, 500);
-  }
+    },
+    () => json({ error: "Unable to load account data." }, 500),
+  );
 }
 
 export async function PUT(request: Request) {
-  try {
+  return observeApiRequest(
+    "account_state_write",
+    async () => {
     const key = normalizedKey(request);
     if (!key) return json({ error: "Unsupported state key." }, 400);
 
@@ -227,24 +245,33 @@ export async function PUT(request: Request) {
     if ("response" in auth) return auth.response;
 
     const db = await getDb();
-    await db
-      .insert(userData)
-      .values({
-        id: crypto.randomUUID(),
-        userId: auth.account.id,
-        key,
-        valueJson: JSON.stringify(payload.value),
-      })
-      .onConflictDoUpdate({
-        target: [userData.userId, userData.key],
-        set: {
-          valueJson: JSON.stringify(payload.value),
-          updatedAt: sql`CURRENT_TIMESTAMP`,
+    await saveAccountState(
+      {
+        upsertForOwner: async (ownerId, stateKey, valueJson) => {
+          await db
+            .insert(userData)
+            .values({
+              id: crypto.randomUUID(),
+              userId: ownerId,
+              key: stateKey,
+              valueJson,
+            })
+            .onConflictDoUpdate({
+              target: [userData.userId, userData.key],
+              set: {
+                valueJson,
+                updatedAt: sql`CURRENT_TIMESTAMP`,
+              },
+            });
         },
-      });
+      },
+      auth.account.id,
+      key,
+      payload.value,
+    );
 
     return json({ saved: true });
-  } catch {
-    return json({ error: "Unable to save account data." }, 500);
-  }
+    },
+    () => json({ error: "Unable to save account data." }, 500),
+  );
 }
