@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, memo, useEffect, useState } from "react";
+import { FormEvent, memo, useEffect, useRef, useState } from "react";
 
 type Screen = "Today" | "Train" | "Fuel" | "Coach" | "Progress";
 type TrainView = "Session" | "Week" | "Library";
@@ -55,6 +55,52 @@ function ForgeIcon({ name }: { name: IconName }) {
   return <svg className="forge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
 
+function useModalA11y<T extends HTMLElement>(onClose: () => void) {
+  const containerRef = useRef<T>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const focusable = () => Array.from(container?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])',
+    ) ?? []).filter((element) => !element.hasAttribute("hidden"));
+
+    focusable()[0]?.focus();
+
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("keydown", handleKey);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocused?.focus();
+    };
+  }, [onClose]);
+
+  return containerRef;
+}
+
 const forgeSparks = Array.from({ length: 120 }, (_, index) => ({
   x: 8 + ((index * 29) % 91),
   origin: 2 + ((index * 13) % 34),
@@ -87,29 +133,34 @@ const ForgeAmbience = memo(function ForgeAmbience({ density = 120 }: { density?:
 });
 
 function CinematicIntro({ mode, athleteName, onSkip }: { mode: LaunchMode; athleteName: string; onSkip: () => void }) {
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onSkip();
+    };
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [onSkip]);
+
   return (
     <div
       className={`cinematic-gate cinematic-${mode}`}
       style={{ "--cinematic-duration": mode === "return" ? "1.05s" : "2.15s" } as React.CSSProperties}
       aria-live="polite"
-      aria-label={mode === "return" ? "Welcome back to Forge" : "Your Forge plan is ready"}
-      role="button"
-      tabIndex={0}
-      onClick={onSkip}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " " || event.key === "Escape") onSkip();
-      }}
+      aria-labelledby="cinematic-title"
+      aria-describedby="cinematic-message"
+      role="dialog"
+      aria-modal="true"
     >
       <ForgeAmbience density={mode === "return" ? 16 : 24} />
       <div className="cinematic-vignette" aria-hidden="true" />
       <div className="cinematic-strike" aria-hidden="true" />
       <div className="cinematic-mark">
         <span>{mode === "return" ? `WELCOME BACK, ${athleteName.toUpperCase()}` : "YOUR PLAN IS READY"}</span>
-        <h1>FORGE</h1>
+        <h1 id="cinematic-title">FORGE</h1>
         <div className="cinematic-rule"><i /></div>
-        <p>{mode === "return" ? "LET’S WORK." : "THE WORK IS YOURS."}</p>
+        <p id="cinematic-message">{mode === "return" ? "LET’S WORK." : "THE WORK IS YOURS."}</p>
       </div>
-      <span className="cinematic-skip">Skip</span>
+      <button className="cinematic-skip" onClick={onSkip} autoFocus>Skip intro</button>
     </div>
   );
 }
@@ -122,44 +173,42 @@ function formatClock(totalSeconds: number) {
 }
 
 function WorkoutComplete({ summary, onToday, onProgress }: { summary: WorkoutSummary; onToday: () => void; onProgress: () => void }) {
+  const dialogRef = useModalA11y<HTMLDivElement>(onToday);
+
   return (
-    <div className="workout-complete" role="dialog" aria-modal="true" aria-labelledby="workout-complete-title">
+    <div ref={dialogRef} className="workout-complete" role="dialog" aria-modal="true" aria-labelledby="workout-complete-title">
       <ForgeAmbience density={28} />
       <div className="completion-strike" aria-hidden="true" />
       <section>
         <p className="eyebrow hot">SESSION FORGED</p>
         <span className="completion-mark">✦</span>
         <h2 id="workout-complete-title">The work is done.<br /><em>The standard remains.</em></h2>
-        <p className="completion-copy">Upper Strength is locked into your protocol. Recover, refuel, and return stronger.</p>
+        <p className="completion-copy">Upper Strength is saved to your account. Recover, refuel, and return when you are ready.</p>
         <div className="completion-stats">
           <div><small>VOLUME</small><strong>{summary.volume.toLocaleString()}<em> kg</em></strong></div>
           <div><small>WORKING SETS</small><strong>{summary.completedSets}<em> / {summary.totalSets}</em></strong></div>
           <div><small>DURATION</small><strong>{formatClock(summary.durationSeconds)}</strong></div>
-          <div><small>AVG. RIR</small><strong>{summary.averageRir.toFixed(1)}</strong></div>
+          <div><small>REPS LEFT</small><strong>{summary.averageRir.toFixed(1)}</strong></div>
         </div>
         <div className="completion-best"><span>BEST SET</span><strong>{summary.bestSet}</strong></div>
         <div className="completion-actions">
           <button className="outline-action" onClick={onToday}>Back to today</button>
           <button className="finish-action" onClick={onProgress}>View progress <span>→</span></button>
         </div>
-        <small className="completion-protocol">THE SPARTAN PROTOCOL · SESSION ARCHIVED</small>
+        <small className="completion-protocol">SAVED TO YOUR ACCOUNT</small>
       </section>
     </div>
   );
 }
 
 const initialExercises: Exercise[] = [
-  { id: "incline", name: "Incline dumbbell press", target: "Upper chest", cue: "4–2–1 tempo · full ROM", sets: [{ kg: 26, reps: 10, done: false }, { kg: 28, reps: 8, done: false }, { kg: 30, reps: 7, done: false }, { kg: 30, reps: 6, done: false }] },
+  { id: "incline", name: "Incline dumbbell press", target: "Upper chest", cue: "4–2–1 tempo · full range", sets: [{ kg: 26, reps: 10, done: false }, { kg: 28, reps: 8, done: false }, { kg: 30, reps: 7, done: false }, { kg: 30, reps: 6, done: false }] },
   { id: "pullup", name: "Weighted pull-up", target: "Lats", cue: "Dead hang · chest to bar", sets: [{ kg: 5, reps: 8, done: false }, { kg: 5, reps: 8, done: false }, { kg: 5, reps: 7, done: false }] },
-  { id: "shoulder", name: "Seated dumbbell press", target: "Shoulders", cue: "No lockout · RIR 2", sets: [{ kg: 22, reps: 10, done: false }, { kg: 22, reps: 9, done: false }, { kg: 22, reps: 8, done: false }] },
+  { id: "shoulder", name: "Seated dumbbell press", target: "Shoulders", cue: "No lockout · stop with 2 clean reps left", sets: [{ kg: 22, reps: 10, done: false }, { kg: 22, reps: 9, done: false }, { kg: 22, reps: 8, done: false }] },
   { id: "triceps", name: "Cable triceps extension", target: "Triceps", cue: "Long-head bias · controlled", sets: [{ kg: 24, reps: 14, done: false }, { kg: 24, reps: 12, done: false }, { kg: 24, reps: 11, done: false }] },
 ];
 
-const initialMeals: Meal[] = [
-  { id: 1, time: "07:20", name: "Breakfast", detail: "5 eggs · fresh milk", kcal: 640, protein: 46 },
-  { id: 2, time: "12:15", name: "Lunch", detail: "Rice · chicken breast · greens", kcal: 720, protein: 58 },
-  { id: 3, time: "16:20", name: "Pre-workout", detail: "Banana · yogurt", kcal: 260, protein: 12 },
-];
+const initialMeals: Meal[] = [];
 
 const weekPlan = [
   { day: "MON", date: "27", title: "Upper strength", focus: "Chest · Back", duration: "80 min", status: "today" },
@@ -173,11 +222,11 @@ const weekPlan = [
 
 const exerciseLibrary: LibraryMove[] = [
   { target: "CHEST", name: "Incline dumbbell press", role: "Primary · Strength", cue: "4–2–1 tempo", startKg: 26, reps: 8 },
-  { target: "BACK", name: "Weighted pull-up", role: "Primary · Width", cue: "Full ROM", startKg: 5, reps: 8 },
+  { target: "BACK", name: "Weighted pull-up", role: "Primary · Width", cue: "Full range", startKg: 5, reps: 8 },
   { target: "BACK", name: "Chest-supported row", role: "Primary · Thickness", cue: "Pause at peak", startKg: 40, reps: 10 },
-  { target: "SHOULDERS", name: "Seated dumbbell press", role: "Primary · Strength", cue: "RIR 2", startKg: 22, reps: 9 },
+  { target: "SHOULDERS", name: "Seated dumbbell press", role: "Primary · Strength", cue: "Stop with 2 clean reps left", startKg: 22, reps: 9 },
   { target: "ARMS", name: "Cable triceps extension", role: "Accessory · Long head", cue: "Control", startKg: 24, reps: 12 },
-  { target: "LEGS", name: "Hip abduction", role: "Recovery · Knee friendly", cue: "Pain-free ROM", startKg: 25, reps: 15 },
+  { target: "LEGS", name: "Hip abduction", role: "Recovery · Knee friendly", cue: "Pain-free range", startKg: 25, reps: 15 },
 ];
 
 function useStoredState<T>(key: string, fallback: T, accountBacked = false) {
@@ -521,8 +570,8 @@ export default function Home({
   const [entryStage, setEntryStage] = useState<EntryStage>(initialEntryStage);
   const [screen, setScreen] = useState<Screen>("Today");
   const [exercises, setExercises, exercisesReady, exercisesLoadError, exercisesSyncError] = useStoredState("forge-exercises", initialExercises, accountBacked);
-  const [meals, setMeals, mealsReady, mealsLoadError, mealsSyncError] = useStoredState("forge-meals", accountBacked ? [] : initialMeals, accountBacked);
-  const [water, setWater, waterReady, waterLoadError, waterSyncError] = useStoredState("forge-water", accountBacked ? 0 : 1750, accountBacked);
+  const [meals, setMeals, mealsReady, mealsLoadError, mealsSyncError] = useStoredState("forge-meals", initialMeals, accountBacked);
+  const [water, setWater, waterReady, waterLoadError, waterSyncError] = useStoredState("forge-water", 0, accountBacked);
   const [workoutStarted, setWorkoutStarted, workoutReady, workoutLoadError, workoutSyncError] = useStoredState("forge-workout-live", false, accountBacked);
   const [workoutStartedAt, setWorkoutStartedAt, startedAtReady, startedAtLoadError, startedAtSyncError] = useStoredState("forge-workout-started-at", 0, accountBacked);
   const [workoutHistory, setWorkoutHistory, historyReady, historyLoadError, historySyncError] = useStoredState<WorkoutSummary[]>("forge-workout-history", [], accountBacked);
@@ -623,7 +672,7 @@ export default function Home({
             <strong>FORGE</strong>
           </button>
           <nav className="desktop-nav" aria-label="Primary navigation">
-            {nav.map((item) => <button key={item.name} className={screen === item.name ? "active" : ""} onClick={() => go(item.name)}><ForgeIcon name={item.icon}/><span>{item.name}</span></button>)}
+            {nav.map((item) => <button key={item.name} aria-current={screen === item.name ? "page" : undefined} className={screen === item.name ? "active" : ""} onClick={() => go(item.name)}><ForgeIcon name={item.icon}/><span>{item.name}</span></button>)}
           </nav>
           <div className="top-actions">
             <button className="quick-command" onClick={() => setCommandOpen(true)} aria-label="Open quick actions"><ForgeIcon name="plus"/><span>Quick</span></button>
@@ -640,7 +689,7 @@ export default function Home({
         </main>
 
         <nav className="mobile-dock" aria-label="Mobile navigation">
-          {nav.map((item) => <button key={item.name} className={screen === item.name ? "active" : ""} onClick={() => go(item.name)}><i><ForgeIcon name={item.icon}/></i><span>{item.name}</span></button>)}
+          {nav.map((item) => <button key={item.name} aria-current={screen === item.name ? "page" : undefined} className={screen === item.name ? "active" : ""} onClick={() => go(item.name)}><i><ForgeIcon name={item.icon}/></i><span>{item.name}</span></button>)}
         </nav>
 
         {commandOpen && <CommandPalette onClose={() => setCommandOpen(false)} go={go} startWorkout={startWorkout} addWater={() => { setWater((value) => Math.min(3200, value + 250)); setCommandOpen(false); setToast("250 ml water logged."); }} />}
@@ -906,12 +955,16 @@ function Train({
   return (
     <div className="screen">
       <ScreenHeading eyebrow="Training" title="Do the next set." copy="Your workout, set log and rest timer in one place." action={<span className="live-pill"><i /> {started ? `Live · ${elapsed}` : "Ready to start"}</span>} />
-      <div className="section-tabs">{(["Session", "Week", "Library"] as TrainView[]).map((item) => <button className={view === item ? "active" : ""} onClick={() => setView(item)} key={item}>{item}</button>)}</div>
+      <div className="section-tabs" role="tablist" aria-label="Training views">{(["Session", "Week", "Library"] as TrainView[]).map((item) => {
+        const tabId = `train-tab-${item.toLowerCase()}`;
+        const panelId = `train-panel-${item.toLowerCase()}`;
+        return <button id={tabId} role="tab" aria-selected={view === item} aria-controls={panelId} className={view === item ? "active" : ""} onClick={() => setView(item)} key={item}>{item}</button>;
+      })}</div>
 
-      {view === "Session" && <div className="training-layout">
+      {view === "Session" && <div id="train-panel-session" className="training-layout" role="tabpanel" aria-labelledby="train-tab-session">
         <section className="training-main">
           <div className="training-banner">
-            <div><p className="eyebrow hot">{started ? "Workout in progress" : "Today’s workout"}</p><h2>Upper strength</h2><span>{started ? `${done.length} of ${allSets.length} sets logged · ${volume.toLocaleString()} kg` : `${allSets.length} working sets · target RIR 1–2`}</span></div>
+            <div><p className="eyebrow hot">{started ? "Workout in progress" : "Starter workout"}</p><h2>Upper strength</h2><span>{started ? `${done.length} of ${allSets.length} sets logged · ${volume.toLocaleString()} kg` : `${allSets.length} working sets · stop with 1–2 clean reps left`}</span></div>
             <button className="primary-action" onClick={beginSession}>{started ? `Live · ${elapsed}` : "Begin session"} <span>→</span></button>
           </div>
           <div className="exercise-accordion">
@@ -919,19 +972,20 @@ function Train({
               const open = expanded === exercise.id;
               const completed = exercise.sets.filter((set) => set.done).length;
               return <article className={`exercise-block ${open ? "open" : ""}`} key={exercise.id}>
-                <button className="exercise-summary" onClick={() => setExpanded(open ? "" : exercise.id)}>
+                <button className="exercise-summary" aria-expanded={open} aria-controls={`exercise-${exercise.id}-sets`} onClick={() => setExpanded(open ? "" : exercise.id)}>
                   <span className="exercise-number">0{exerciseIndex + 1}</span>
                   <p><small>{exercise.target}</small><strong>{exercise.name}</strong><span>{exercise.cue}</span></p>
                   <b>{completed}/{exercise.sets.length}</b><i>⌄</i>
                 </button>
-                {open && <div className="set-editor">
+                {open && <div className="set-editor" id={`exercise-${exercise.id}-sets`}>
                   <div className="set-head"><span>SET</span><span>KG</span><span>REPS</span><span>RIR</span><span>STATUS</span></div>
+                  <p className="field-help" id={`exercise-${exercise.id}-rir-help`}>RIR means the clean reps you could still do. Stop if a movement hurts.</p>
                   {exercise.sets.map((set, setIndex) => <div className={`set-row ${set.done ? "done" : ""}`} key={setIndex}>
                     <span>{setIndex + 1}</span>
                     <SetInput label={`Weight for set ${setIndex + 1}`} unit="kg" value={set.kg} min={0} onChange={(value) => updateSet(exercise.id, setIndex, "kg", value)} />
                     <SetInput label={`Reps for set ${setIndex + 1}`} unit="reps" value={set.reps} min={1} onChange={(value) => updateSet(exercise.id, setIndex, "reps", value)} />
                     <label className="rir-input">
-                      <select aria-label={`RIR for set ${setIndex + 1}`} value={set.rir ?? 2} onChange={(event) => updateSet(exercise.id, setIndex, "rir", Number(event.target.value))}>
+                      <select aria-label={`Reps in reserve for set ${setIndex + 1}`} aria-describedby={`exercise-${exercise.id}-rir-help`} value={set.rir ?? 2} onChange={(event) => updateSet(exercise.id, setIndex, "rir", Number(event.target.value))}>
                         {[0,1,2,3,4,5].map((value) => <option value={value} key={value}>{value}</option>)}
                       </select>
                       <span>RIR</span>
@@ -949,7 +1003,7 @@ function Train({
         </section>
         <aside className="session-rail">
           <p className="eyebrow">Workout status</p>
-          <div className="progress-orbit" style={{ "--progress": `${progress * 3.6}deg` } as React.CSSProperties}><span><strong>{progress}%</strong><small>complete</small></span></div>
+          <div className="progress-orbit" role="progressbar" aria-label="Workout progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} style={{ "--progress": `${progress * 3.6}deg` } as React.CSSProperties}><span><strong>{progress}%</strong><small>complete</small></span></div>
           <dl><div><dt>Working sets</dt><dd>{done.length} / {allSets.length}</dd></div><div><dt>Volume</dt><dd>{volume.toLocaleString()} kg</dd></div><div><dt>Elapsed</dt><dd>{elapsed}</dd></div></dl>
           <div className={`rest-card${restRemaining ? " active" : ""}`}>
             <span>{restRemaining ? "RESTING" : "REST TIMER"}</span>
@@ -969,13 +1023,13 @@ function Train({
         </aside>
       </div>}
 
-      {view === "Week" && <section className="week-board">
+      {view === "Week" && <section id="train-panel-week" className="week-board" role="tabpanel" aria-labelledby="train-tab-week">
         <header><div><p className="eyebrow">Planning preview</p><h2>Example training week</h2><span className="honesty-note">This schedule is illustrative until weekly planning is connected to your account.</span></div><button className="outline-action" onClick={() => setView("Session")}>Open today&apos;s workout</button></header>
         <div className="week-plan">{weekPlan.map((day) => <article className={day.status} key={day.day}><div><span>{day.day}</span><strong>{day.date}</strong></div><p><small>{day.status === "rest" ? "Recovery" : "Training"}</small><strong>{day.title}</strong><span>{day.focus}</span></p><b>{day.duration}</b></article>)}</div>
         <p className="program-note"><span>i</span><b>Safety note</b> Pain, swelling or loss of normal movement should change the plan. FORGE does not replace medical care.</p>
       </section>}
 
-      {view === "Library" && <section className="library-view">
+      {view === "Library" && <section id="train-panel-library" className="library-view" role="tabpanel" aria-labelledby="train-tab-library">
         <header><div><p className="eyebrow">Exercise library</p><h2>Find a movement.</h2></div><label className="library-search"><span>⌕</span><input aria-label="Search exercises" value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} placeholder="Search movement or muscle…" /></label></header>
         <div className="library-grid">{visibleLibrary.map((move) => {
           const inPlan = exercises.some((exercise) => exercise.name === move.name);
@@ -1029,7 +1083,7 @@ function Fuel({ meals, setMeals, water, setWater, notify }: { meals: Meal[]; set
           <p className="eyebrow hot">Logged today</p>
           <div><strong>{calories.toLocaleString()}</strong><span>kcal</span></div>
           <p><b>{Math.max(0, calorieTarget - calories).toLocaleString()} remaining</b><span>against the current default target</span></p>
-          <i className="fuel-progress"><b style={{ width: `${calorieProgress}%` }} /></i>
+          <i className="fuel-progress" role="progressbar" aria-label="Energy logged" aria-valuemin={0} aria-valuemax={100} aria-valuenow={calorieProgress}><b style={{ width: `${calorieProgress}%` }} /></i>
         </div>
         <div className="macro-ledger">
           {[
@@ -1039,7 +1093,7 @@ function Fuel({ meals, setMeals, water, setWater, notify }: { meals: Meal[]; set
           ].map((macro) => <div key={macro.name} className={macro.tone}>
             <span>{macro.name}</span>
             <strong>{macro.current.toLocaleString()}<small>/{macro.target.toLocaleString()}{macro.unit}</small></strong>
-            <i><b style={{ width: `${Math.min(100, macro.current / macro.target * 100)}%` }} /></i>
+            <i role="progressbar" aria-label={`${macro.name} logged`} aria-valuemin={0} aria-valuemax={macro.target} aria-valuenow={Math.min(macro.current, macro.target)}><b style={{ width: `${Math.min(100, macro.current / macro.target * 100)}%` }} /></i>
           </div>)}
         </div>
         <p className="target-note">These are current default targets, not a medical prescription. Personal target settings come later.</p>
@@ -1063,8 +1117,8 @@ function Fuel({ meals, setMeals, water, setWater, notify }: { meals: Meal[]; set
         <aside className="water-ledger">
           <header><p className="eyebrow">Water</p><span>{waterProgress}%</span></header>
           <div className="water-score"><strong>{(water / 1000).toFixed(2)}</strong><span>/ 3.20 L</span></div>
-          <div className="water-gauge"><i style={{ width: `${waterProgress}%` }} /></div>
-          <div className="water-actions"><button aria-label="Remove 250 ml water" onClick={() => { setWater((value) => Math.max(0, value - 250)); notify("250 ml removed."); }}>−</button><button onClick={() => { setWater((value) => Math.min(3200, value + 250)); notify("250 ml water logged."); }}>Add 250 ml</button></div>
+          <div className="water-gauge" role="progressbar" aria-label="Water logged" aria-valuemin={0} aria-valuemax={3200} aria-valuenow={water}><i style={{ width: `${waterProgress}%` }} /></div>
+          <div className="water-actions"><button aria-label="Remove 250 ml water" onClick={() => { setWater((value) => Math.max(0, value - 250)); notify("250 ml removed."); }}>−</button><button aria-label="Add 250 ml water" onClick={() => { setWater((value) => Math.min(3200, value + 250)); notify("250 ml water logged."); }}>Add 250 ml</button></div>
           <p>{water >= 3200 ? "Daily target" : "Next checkpoint"} <strong>{(nextWaterCheckpoint / 1000).toFixed(2)} L</strong></p>
         </aside>
       </div>
@@ -1112,7 +1166,7 @@ function Coach({ exercises, meals }: { exercises: Exercise[]; meals: Meal[] }) {
             <div className="forge-orb"><span>F</span></div>
             <div><p>FORGE Coach</p><small>Rule-based prototype</small></div>
           </header>
-          <div className="conversation-feed">
+          <div className="conversation-feed" role="log" aria-live="polite" aria-label="Coach conversation">
             {messages.map((message, index) => <div className={`chat-bubble ${message.role}`} key={index}><small>{message.role === "coach" ? "FORGE" : "You"}</small><p>{message.text}</p></div>)}
           </div>
           <div className="coach-quick-prompts" aria-label="Suggested coach questions">
@@ -1156,7 +1210,7 @@ function Progress({ exercises, history, workoutStarted, onTrain }: { exercises: 
   const maxVolume = Math.max(1, ...chartSessions.map((session) => session.volume));
   const trendCopy = filteredHistory.length < 3
     ? `Log ${3 - filteredHistory.length} more ${3 - filteredHistory.length === 1 ? "session" : "sessions"} before changing the plan.`
-    : "Enough data is forming. Compare quality, RIR and volume before adding load.";
+    : "Enough data is forming. Compare technique, clean reps left and volume before adding load.";
 
   if (!history.length) {
     return (
@@ -1173,18 +1227,18 @@ function Progress({ exercises, history, workoutStarted, onTrain }: { exercises: 
 
   return (
     <div className="screen">
-      <ScreenHeading eyebrow="Progress" title="What the work changed." copy="Completed workouts only—no placeholder metrics." action={<div className="range-switch">{["4W", "12W", "6M"].map((item) => <button className={range === item ? "active" : ""} onClick={() => setRange(item)} key={item}>{item}</button>)}</div>} />
+      <ScreenHeading eyebrow="Progress" title="What the work changed." copy="Completed workouts only—no placeholder metrics." action={<div className="range-switch" role="group" aria-label="Progress time range">{["4W", "12W", "6M"].map((item) => <button aria-pressed={range === item} className={range === item ? "active" : ""} onClick={() => setRange(item)} key={item}>{item}</button>)}</div>} />
       <section className="progress-overview">
         <div><p className="eyebrow">SESSIONS</p><strong>{filteredHistory.length}</strong><span>completed in {range}</span></div>
         <div><p className="eyebrow">TOTAL VOLUME</p><strong>{(totalVolume / 1000).toFixed(1)}<small> t</small></strong><span>from saved working sets</span></div>
-        <div><p className="eyebrow">AVERAGE EFFORT</p><strong>{averageRir.toFixed(1)}<small> RIR</small></strong><span>across completed sessions</span></div>
+        <div><p className="eyebrow">AVERAGE EFFORT</p><strong>{averageRir.toFixed(1)}<small> reps left</small></strong><span>clean reps left across saved workouts</span></div>
       </section>
       <section className="latest-forge">
         <div><p className="eyebrow hot">Latest workout</p><h2>{latest.title}</h2><span>{latest.bestSet}</span></div>
         <dl>
           <div><dt>Volume</dt><dd>{latest.volume.toLocaleString()} kg</dd></div>
           <div><dt>Duration</dt><dd>{formatClock(latest.durationSeconds)}</dd></div>
-          <div><dt>Average RIR</dt><dd>{latest.averageRir.toFixed(1)}</dd></div>
+          <div><dt>Average reps left</dt><dd>{latest.averageRir.toFixed(1)}</dd></div>
         </dl>
       </section>
       <section className="performance-chart">
@@ -1214,9 +1268,11 @@ function ScreenHeading({ eyebrow, title, copy, action }: { eyebrow: string; titl
 }
 
 function CommandPalette({ onClose, go, startWorkout, addWater }: { onClose: () => void; go: (screen: Screen) => void; startWorkout: () => void; addWater: () => void }) {
+  const dialogRef = useModalA11y<HTMLElement>(onClose);
+
   return <div className="modal-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <section className="command-palette" role="dialog" aria-modal="true" aria-label="Quick actions">
-      <header className="quick-actions-head"><div><p>Quick actions</p><strong>What do you need right now?</strong></div><button onClick={onClose} aria-label="Close quick actions">×</button></header>
+    <section ref={dialogRef} className="command-palette" role="dialog" aria-modal="true" aria-labelledby="quick-actions-title">
+      <header className="quick-actions-head"><div><p>Quick actions</p><strong id="quick-actions-title">What do you need right now?</strong></div><button onClick={onClose} aria-label="Close quick actions">×</button></header>
       <p>Choose one action.</p>
       <button onClick={startWorkout}><i>Ⅱ</i><span><strong>Start today&apos;s workout</strong><small>Upper strength · 13 working sets</small></span><b>→</b></button>
       <button onClick={addWater}><i>◒</i><span><strong>Log 250 ml water</strong><small>Add to today&apos;s hydration</small></span><b>+</b></button>
@@ -1227,6 +1283,7 @@ function CommandPalette({ onClose, go, startWorkout, addWater }: { onClose: () =
 }
 
 function MealDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (meal: Omit<Meal, "id">) => void }) {
+  const dialogRef = useModalA11y<HTMLFormElement>(onClose);
   const presets = [
     { label: "Breakfast", name: "Eggs & milk", detail: "5 eggs · fresh milk", kcal: 640, protein: 46 },
     { label: "Main meal", name: "Chicken rice", detail: "Rice · chicken breast · greens", kcal: 720, protein: 58 },
@@ -1239,8 +1296,8 @@ function MealDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (meal: Omi
     onAdd(draft);
   }
   return <div className="modal-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <form className="meal-dialog" onSubmit={submit}>
-      <header><div><p className="eyebrow hot">Nutrition log</p><h2>Add a meal</h2></div><button type="button" onClick={onClose}>×</button></header>
+    <form ref={dialogRef} className="meal-dialog" role="dialog" aria-modal="true" aria-labelledby="meal-dialog-title" onSubmit={submit}>
+      <header><div><p className="eyebrow hot">Nutrition log</p><h2 id="meal-dialog-title">Add a meal</h2></div><button type="button" onClick={onClose} aria-label="Close meal form">×</button></header>
       <div className="meal-presets"><span>Quick fill</span><div>{presets.map((preset) => <button type="button" onClick={() => setDraft((current) => ({ ...current, name: preset.name, detail: preset.detail, kcal: preset.kcal, protein: preset.protein }))} key={preset.label}>{preset.label}</button>)}</div></div>
       <label>Meal name<input name="name" value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Recovery dinner" required /></label>
       <label>Food details <small>optional</small><input name="detail" value={draft.detail} onChange={(event) => setDraft((current) => ({ ...current, detail: event.target.value }))} placeholder="Rice · chicken · greens" /></label>
@@ -1267,13 +1324,14 @@ function ProfileDrawer({
 }) {
   const [draft, setDraft] = useState(profile);
   const displayName = draft.displayName.trim() || "Athlete";
+  const drawerRef = useModalA11y<HTMLElement>(onClose);
 
   return <div className="drawer-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <aside className="profile-drawer">
-      <header><div><span>{displayName.slice(0, 1).toUpperCase()}</span><p><strong>{displayName}</strong><small>{email || "Signed-in athlete"}</small></p></div><button onClick={onClose}>×</button></header>
+    <aside ref={drawerRef} className="profile-drawer" role="dialog" aria-modal="true" aria-labelledby="profile-drawer-title">
+      <header><div><span aria-hidden="true">{displayName.slice(0, 1).toUpperCase()}</span><p><strong id="profile-drawer-title">{displayName}</strong><small>{email || "Signed-in athlete"}</small></p></div><button onClick={onClose} aria-label="Close profile">×</button></header>
       <section className="account-profile"><p className="eyebrow">Athlete profile</p><label>Display name<input value={draft.displayName} maxLength={80} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="How FORGE should address you" /></label><dl><div><dt>Account</dt><dd>Protected</dd></div><div><dt>Plan</dt><dd>Free</dd></div><div><dt>Data</dt><dd>Account synced</dd></div></dl></section>
       <section><p className="eyebrow">Safety preferences</p><ul><li>Stop or adjust movements that cause pain.</li><li>Progress only with clean range of motion and control.</li><li>Review persistent symptoms with a qualified professional.</li></ul></section>
-      <section><p className="eyebrow">Preferences</p><div className="preference"><span>Units</span><div>{(["Metric", "Imperial"] as const).map((item) => <button className={draft.units === item ? "active" : ""} onClick={() => setDraft((current) => ({ ...current, units: item }))} key={item}>{item}</button>)}</div></div><div className="preference"><span>Session reminders</span><button className={`toggle ${draft.notifications ? "on" : ""}`} onClick={() => setDraft((current) => ({ ...current, notifications: !current.notifications }))}><i /></button></div></section>
+      <section><p className="eyebrow">Preferences</p><div className="preference"><span>Units</span><div role="group" aria-label="Measurement units">{(["Metric", "Imperial"] as const).map((item) => <button aria-pressed={draft.units === item} className={draft.units === item ? "active" : ""} onClick={() => setDraft((current) => ({ ...current, units: item }))} key={item}>{item}</button>)}</div></div><div className="preference"><span>Session reminders</span><button aria-label="Session reminders" aria-pressed={draft.notifications} className={`toggle ${draft.notifications ? "on" : ""}`} onClick={() => setDraft((current) => ({ ...current, notifications: !current.notifications }))}><i /></button></div></section>
       <section className="demo-tools">
         <p className="eyebrow">Account</p>
         <button onClick={onReplayLogin}><span><b>Replay welcome</b><small>Replay the short cinematic</small></span><i>↗</i></button>
