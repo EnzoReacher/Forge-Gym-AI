@@ -13,4 +13,4 @@ export const metadata:Metadata={
   },
   other:{"codex-preview":"development"}
 };
-export default function Layout({children}:{children:React.ReactNode}){return <html lang="vi"><body className={outfit.variable}>{children}</body></html>}
+export default function Layout({children}:{children:React.ReactNode}){return <html lang="en"><body className={outfit.variable}>{children}</body></html>}
