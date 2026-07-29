@@ -90,9 +90,9 @@ function CinematicIntro({ mode, athleteName, onSkip }: { mode: LaunchMode; athle
   return (
     <div
       className={`cinematic-gate cinematic-${mode}`}
-      style={{ "--cinematic-duration": mode === "return" ? "1.25s" : "3s" } as React.CSSProperties}
+      style={{ "--cinematic-duration": mode === "return" ? "1.05s" : "2.15s" } as React.CSSProperties}
       aria-live="polite"
-      aria-label={mode === "return" ? "Welcome back to Forge" : "Your Forge protocol is ready"}
+      aria-label={mode === "return" ? "Welcome back to Forge" : "Your Forge plan is ready"}
       role="button"
       tabIndex={0}
       onClick={onSkip}
@@ -100,17 +100,16 @@ function CinematicIntro({ mode, athleteName, onSkip }: { mode: LaunchMode; athle
         if (event.key === "Enter" || event.key === " " || event.key === "Escape") onSkip();
       }}
     >
-      <ForgeAmbience density={32} />
+      <ForgeAmbience density={mode === "return" ? 16 : 24} />
       <div className="cinematic-vignette" aria-hidden="true" />
       <div className="cinematic-strike" aria-hidden="true" />
       <div className="cinematic-mark">
-        <span>{mode === "return" ? `WELCOME BACK, ${athleteName.toUpperCase()}` : "PROTOCOL FORGED"}</span>
+        <span>{mode === "return" ? `WELCOME BACK, ${athleteName.toUpperCase()}` : "YOUR PLAN IS READY"}</span>
         <h1>FORGE</h1>
         <div className="cinematic-rule"><i /></div>
-        <p>{mode === "return" ? "LET’S FIGHT." : "ENTER THE ARENA."}</p>
-        <small>THE SPARTAN PROTOCOL</small>
+        <p>{mode === "return" ? "LET’S WORK." : "THE WORK IS YOURS."}</p>
       </div>
-      <span className="cinematic-skip">TAP TO SKIP</span>
+      <span className="cinematic-skip">Skip</span>
     </div>
   );
 }
@@ -264,153 +263,130 @@ function EntryFlow({ onEnter, initialStage = "landing" }: { onEnter: (mode: Laun
   if (stage === "landing") {
     return (
       <div className="entry-shell landing-page">
-        <ForgeAmbience />
+        <ForgeAmbience density={36} />
         <header className="entry-nav">
           <button className="entry-brand" aria-label="Forge home"><strong>FORGE</strong></button>
           <nav className="landing-nav-links" aria-label="Landing navigation">
-            <a href="#system">SYSTEM</a>
-            <a href="#intelligence">INTELLIGENCE</a>
-            <a href="#arsenal">ARSENAL</a>
+            <a href="#how-it-works">How it works</a>
+            <a href="#inside-forge">Inside FORGE</a>
           </nav>
-          <button className="entry-login-link" onClick={() => setStage("login")}>SIGN IN <span>↗</span></button>
+          <button className="entry-login-link" onClick={() => setStage("login")}>Sign in <span>↗</span></button>
         </header>
 
         <main className="landing-main">
           <section className="landing-hero">
             <div className="landing-copy">
-              <p className="entry-eyebrow"><span>✦</span> YOUR ENTIRE TRAINING SYSTEM</p>
-              <h1>Build strength.<br /><em>Command progress.</em></h1>
-              <p className="landing-lead">One adaptive system for training, recovery, nutrition and the decisions between every rep.</p>
+              <p className="entry-eyebrow">Training, food, recovery, one clear place</p>
+              <h1>Know what to do.<br /><em>Then do the work.</em></h1>
+              <p className="landing-lead">FORGE keeps your plan, workout log, nutrition and progress together—so you spend less time sorting data and more time building yourself.</p>
               <div className="landing-actions">
-                <button className="entry-primary" onClick={() => setStage("onboarding")}>ENTER FORGE <span>→</span></button>
-                <a className="entry-ghost" href="#system">EXPLORE THE SYSTEM ↓</a>
+                <button className="entry-primary" onClick={() => setStage("onboarding")}>Set up my plan <span>→</span></button>
+                <a className="entry-ghost" href="#how-it-works">See how it works</a>
               </div>
-              <div className="landing-proof">
-                <div><strong>01</strong><span>Adaptive plan</span></div>
-                <div><strong>24/7</strong><span>AI coach</span></div>
-                <div><strong>360°</strong><span>Performance view</span></div>
+              <div className="landing-proof" aria-label="What Forge helps with">
+                <div><strong>Today</strong><span>See the next useful action</span></div>
+                <div><strong>Train</strong><span>Log without leaving the flow</span></div>
+                <div><strong>Progress</strong><span>Learn what the work changed</span></div>
               </div>
             </div>
 
-            <div className="landing-monolith" aria-hidden="true">
-              <div className="molten-edge" />
-              <span>THE SPARTAN PROTOCOL / 01</span>
-              <strong>F</strong>
-              <p>PRESSURE<br />MAKES<br /><em>POWER.</em></p>
-              <small>FORGED DAILY</small>
+            <div className="landing-monolith" aria-label="Example training day">
+              <div className="molten-edge" aria-hidden="true" />
+              <header><span>Example day</span><small>Tuesday</small></header>
+              <div className="monolith-session">
+                <small>Next session</small>
+                <h2>Upper strength</h2>
+                <p>Chest · Back · Shoulders</p>
+              </div>
+              <ol>
+                <li><span>01</span><p><strong>Incline press</strong><small>4 working sets</small></p></li>
+                <li><span>02</span><p><strong>Weighted pull-up</strong><small>3 working sets</small></p></li>
+                <li><span>03</span><p><strong>Shoulder press</strong><small>3 working sets</small></p></li>
+              </ol>
+              <footer><span>Plan ready</span><strong>Start when you are</strong></footer>
             </div>
           </section>
 
-          <section className="landing-system" id="system">
+          <section className="landing-system" id="how-it-works">
             <header className="landing-section-head">
-              <p className="entry-eyebrow"><span>✦</span> THE FORGE LOOP</p>
+              <p className="entry-eyebrow">How it works</p>
               <div>
-                <h2>Five disciplines.<br />One clear next move.</h2>
-                <p>FORGE turns the noise of fitness data into a daily command: what to do, how hard to push and when to recover.</p>
+                <h2>One loop you can understand.</h2>
+                <p>Open FORGE, see what matters, do the work and record the result. Tomorrow starts from what actually happened.</p>
               </div>
             </header>
-
             <div className="system-rail">
               {[
-                ["01", "TODAY", "Readiness, schedule and the session that matters now."],
-                ["02", "TRAIN", "Adaptive programming and focused live workout logging."],
-                ["03", "FUEL", "Calories, macros, hydration and meals in one rhythm."],
-                ["04", "COACH", "Context-aware guidance that remembers how you train."],
-                ["05", "PROGRESS", "Strength, body and consistency made visible."],
+                ["01", "Today", "Your recovery, schedule and next useful action."],
+                ["02", "Train", "Your plan and workout log in the same flow."],
+                ["03", "Fuel", "Meals, macros and hydration without spreadsheet noise."],
+                ["04", "Coach", "Guidance that uses the context you choose to share."],
+                ["05", "Progress", "Strength, body and consistency shown clearly."],
               ].map(([number, title, copy]) => (
                 <article key={title}>
                   <small>{number}</small>
                   <h3>{title}</h3>
                   <p>{copy}</p>
-                  <i>↗</i>
+                  <i aria-hidden="true">—</i>
                 </article>
               ))}
             </div>
           </section>
 
-          <section className="landing-command">
+          <section className="landing-command" id="inside-forge">
             <div className="landing-command-copy">
-              <p className="entry-eyebrow"><span>✦</span> COMMAND CENTER</p>
-              <h2>Wake up.<br />Know the move.</h2>
-              <p>Sleep, stress, recovery and weekly load meet in one readiness score. Your plan adjusts before ego gets a vote.</p>
+              <p className="entry-eyebrow">Built for the gym floor</p>
+              <h2>Less dashboard.<br />More direction.</h2>
+              <p>FORGE makes the next action obvious and keeps secondary detail out of your way until you need it.</p>
               <ul>
-                <li><span>01</span>Daily readiness and recovery signals</li>
-                <li><span>02</span>Adaptive session prescription</li>
-                <li><span>03</span>Schedule, meals and habits on one timeline</li>
+                <li><span>01</span>Start or adjust today’s session</li>
+                <li><span>02</span>Log sets, meals and water quickly</li>
+                <li><span>03</span>Review progress without vanity noise</li>
               </ul>
             </div>
-            <div className="command-ui" aria-label="Forge Today preview">
-              <header><span>TODAY / 27 JUL</span><i>LIVE</i></header>
-              <div className="command-greeting"><small>GOOD AFTERNOON, HOÀNG.</small><strong>Ready to train.</strong></div>
+            <div className="command-ui" aria-label="Sample Forge workout">
+              <header><span>Sample workout</span><i>In progress</i></header>
+              <div className="command-greeting"><small>Upper strength</small><strong>Three movements left.</strong></div>
               <div className="command-grid">
                 <article className="command-session">
-                  <small>SESSION IN PROGRESS</small>
-                  <h3>Upper strength</h3>
-                  <p>Chest · Back · Shoulders</p>
-                  <div><span>13<small>WORKING SETS</small></span><span>75–90<small>MINUTES</small></span><span>RIR 1–2<small>EFFORT</small></span></div>
-                  <button onClick={() => setStage("onboarding")}>START SESSION <b>→</b></button>
+                  <small>Current movement</small>
+                  <h3>Incline dumbbell press</h3>
+                  <p>Full range · controlled tempo</p>
+                  <div><span>30 kg<small>Weight</small></span><span>8<small>Reps</small></span><span>2<small>Reps in reserve</small></span></div>
+                  <button onClick={() => setStage("onboarding")}>Build my plan <b>→</b></button>
                 </article>
                 <article className="command-score">
-                  <small>READINESS</small>
-                  <strong>92<em>/100</em></strong>
-                  <p><span>Sleep</span><b style={{ width: "88%" }} /></p>
-                  <p><span>Recovery</span><b style={{ width: "92%" }} /></p>
-                  <p><span>Stress</span><b style={{ width: "34%" }} /></p>
+                  <small>Why this matters</small>
+                  <strong>Clear<em>, not crowded</em></strong>
+                  <p>The controls you need stay close. Everything else waits.</p>
                 </article>
               </div>
             </div>
           </section>
 
-          <section className="landing-intelligence" id="intelligence">
-            <header className="landing-section-head compact">
-              <p className="entry-eyebrow"><span>✦</span> ADAPTIVE INTELLIGENCE</p>
-              <div>
-                <h2>A coach with context.<br />Not canned motivation.</h2>
-                <p>Ask about today’s load, a painful joint, your macros or the next training block. FORGE answers from your actual data.</p>
-              </div>
-            </header>
-            <div className="intelligence-grid">
-              <div className="coach-transcript">
-                <header><span>FORGE COACH</span><i>ONLINE</i></header>
-                <p className="athlete-line">Should I push the top set today?</p>
-                <div className="forge-line"><b>✦</b><p>Your readiness is <strong>92</strong>, but pressing volume is already 14% above baseline. Keep the top set. Cap back-offs at RIR 2.</p></div>
-                <div className="coach-chips"><span>ADJUST SESSION</span><span>EXPLAIN LOAD</span><span>PLAN A MEAL</span></div>
-              </div>
-              <div className="intel-stack">
-                <article><span>MEMORY / 01</span><h3>Knows your history.</h3><p>Goals, injuries, preferences and completed work stay in the conversation.</p></article>
-                <article><span>VISION / 02</span><h3>Log from a glance.</h3><p>Scan a meal or barcode and turn it into usable nutrition data.</p></article>
-                <article><span>ADAPT / 03</span><h3>Changes with you.</h3><p>Miss a session, sleep badly or hit a PR—the plan recalculates.</p></article>
-              </div>
+          <section className="landing-intelligence">
+            <div className="landing-belief">
+              <p className="entry-eyebrow">The role of FORGE</p>
+              <h2>We stand beside you.<br />We do not do the work for you.</h2>
+              <p>FORGE helps make training easier to understand and easier to continue. Your effort, choices and consistency decide the outcome.</p>
             </div>
-          </section>
-
-          <section className="landing-arsenal" id="arsenal">
-            <header className="landing-section-head">
-              <p className="entry-eyebrow"><span>✦</span> THE FULL ARSENAL</p>
-              <div>
-                <h2>Everything that earns<br />its place in the gym bag.</h2>
-                <p>No ornamental dashboards. Every tool removes friction from training, recovery or nutrition.</p>
-              </div>
-            </header>
-            <div className="arsenal-grid">
-              <article className="arsenal-feature feature-train"><small>TRAIN / 01</small><h3>Program. Log. Progress.</h3><p>Weekly splits, live sets, rest control, RIR and session history—built for moving fast between sets.</p><div className="mini-set"><span>INCLINE PRESS</span><b>30 KG</b><i>8 REPS</i><em>✓</em></div></article>
-              <article className="arsenal-feature feature-fuel"><small>FUEL / 02</small><h3>Eat for the mission.</h3><p>Macro targets, hydration, recipe generation, meal vision and barcode scanning without spreadsheet fatigue.</p><div className="macro-rings"><b>2,120<small>KCAL</small></b><span>P<strong>168g</strong></span><span>C<strong>244g</strong></span><span>F<strong>61g</strong></span></div></article>
-              <article className="arsenal-feature feature-library"><small>LIBRARY / 03</small><h3>Master the movement.</h3><p>Searchable exercise library, form cues and a visual anatomy map for every muscle you intend to forge.</p><div className="anatomy-mark"><span>DELTS</span><b>CHEST</b><i>LATS</i></div></article>
-              <article className="arsenal-feature feature-progress"><small>PROGRESS / 04</small><h3>See what the work built.</h3><p>Volume, strength, body metrics, diary photos and consistency trends—without vanity noise.</p><div className="mini-chart">{[32,46,40,58,51,72,66,84,79,96].map((height,index)=><i key={index} style={{ height: `${height}%` }} />)}</div></article>
-              <article className="arsenal-feature feature-community"><small>COMMUNITY / 05</small><h3>Compete with standards.</h3><p>Leagues, leaderboards and shared wins for athletes who respect the work.</p><div className="rank-list"><span><b>01</b> HOÀNG <i>8,420</i></span><span><b>02</b> ATLAS <i>8,190</i></span><span><b>03</b> MAYA <i>7,960</i></span></div></article>
-              <article className="arsenal-feature feature-mobile"><small>ANYWHERE / 06</small><h3>Your protocol travels.</h3><p>Installable PWA with a focused mobile experience, ready for the floor, kitchen or recovery day.</p><div className="phone-mark"><span>FORGE</span><b>92</b><small>READY</small></div></article>
+            <div className="landing-belief-lines">
+              <p><span>Train</span><strong>A plan you can follow today.</strong></p>
+              <p><span>Fuel</span><strong>Simple records you can correct.</strong></p>
+              <p><span>Coach</span><strong>Context when you need a second opinion.</strong></p>
+              <p><span>Progress</span><strong>Evidence of what changed over time.</strong></p>
             </div>
           </section>
 
           <section className="landing-final">
-            <p className="entry-eyebrow"><span>✦</span> NO MORE GUESSWORK</p>
-            <h2>Your next stronger version<br />is built one decision at a time.</h2>
-            <p>Set the mission. Calibrate the coach. Enter the forge.</p>
-            <button className="entry-primary" onClick={() => setStage("onboarding")}>FORGE MY PROTOCOL <span>→</span></button>
+            <p className="entry-eyebrow">Start with one honest goal</p>
+            <h2>Build a plan that fits your life.</h2>
+            <p>Three short questions. You can change every answer later.</p>
+            <button className="entry-primary" onClick={() => setStage("onboarding")}>Set up FORGE <span>→</span></button>
           </section>
         </main>
 
-        <footer className="entry-footer landing-footer"><span>FORGE / 2026</span><i /><p>Strength is built. Never found.</p></footer>
+        <footer className="entry-footer landing-footer"><span>FORGE / 2026</span><i /><p>Built to support the work.</p></footer>
       </div>
     );
   }
@@ -418,34 +394,30 @@ function EntryFlow({ onEnter, initialStage = "landing" }: { onEnter: (mode: Laun
   if (stage === "login") {
     return (
       <div className="entry-shell login-page">
-        <ForgeAmbience />
-        <button className="entry-back" onClick={() => setStage("landing")}>← RETURN</button>
+        <ForgeAmbience density={20} />
+        <button className="entry-back" onClick={() => setStage("landing")}>← Back</button>
         <button className="entry-brand login-brand" onClick={() => setStage("landing")} aria-label="Forge home"><strong>FORGE</strong></button>
         <section className="login-manifesto">
-          <p className="entry-eyebrow"><span>✦</span> ATHLETE ACCESS / 01</p>
-          <h1>Return to<br /><em>the work.</em></h1>
-          <blockquote>The protocol remembers where you stopped—and what comes next.</blockquote>
-          <div className="login-readiness-card">
-            <div className="login-score"><small>TODAY</small><strong>92</strong><span>READY</span></div>
-            <div className="login-signals">
-              <p><span>SLEEP</span><b>7H 42M</b><i><em style={{ width: "86%" }} /></i></p>
-              <p><span>RECOVERY</span><b>HIGH</b><i><em style={{ width: "92%" }} /></i></p>
-              <p><span>STRESS</span><b>LOW</b><i><em style={{ width: "31%" }} /></i></p>
-            </div>
+          <p className="entry-eyebrow">Welcome back</p>
+          <h1>Continue where<br /><em>you left off.</em></h1>
+          <blockquote>Your plan, records and progress stay with your account—not with this browser.</blockquote>
+          <div className="login-points">
+            <p><span>01</span><strong>One secure sign-in</strong><small>Use the same ChatGPT account you used before.</small></p>
+            <p><span>02</span><strong>No FORGE password</strong><small>FORGE never asks for or stores your password.</small></p>
+            <p><span>03</span><strong>Your work stays yours</strong><small>Account data is kept separate from other athletes.</small></p>
           </div>
-          <div className="login-streak"><span>NEXT SESSION</span><strong>Upper Strength · 75–90 min</strong><i>13 WORKING SETS</i></div>
         </section>
         <section className="login-panel">
           <div className="login-card">
-            <p className="login-index">SECURE ENTRY / FORGE ID</p>
-            <header><p><strong>Your protocol awaits.</strong><small>Sign in and continue from your last completed rep.</small></p></header>
+            <p className="login-index">Secure sign in</p>
+            <header><p><strong>Ready when you are.</strong><small>Continue with ChatGPT to open your FORGE account.</small></p></header>
             <div className="secure-entry-copy">
-              <span>ONE SECURE STEP</span>
-              <p>FORGE uses your ChatGPT identity. It never asks for or stores your password.</p>
+              <span>Before you continue</span>
+              <p>Check that the ChatGPT account in the sign-in window is the account you want attached to your training records.</p>
             </div>
-            <button className="entry-primary secure-entry-action" onClick={() => onEnter("return")}>CONTINUE WITH CHATGPT <span>→</span></button>
-            <small className="secure-entry-note">Your training records stay attached to your account, not this browser.</small>
-            <footer>No protocol yet? <button onClick={() => setStage("onboarding")}>Forge one now</button></footer>
+            <button className="entry-primary secure-entry-action" onClick={() => onEnter("return")}>Continue with ChatGPT <span>→</span></button>
+            <small className="secure-entry-note">FORGE receives your verified identity. It does not receive your password.</small>
+            <footer>New to FORGE? <button onClick={() => setStage("onboarding")}>Set up your plan</button></footer>
           </div>
         </section>
       </div>
@@ -453,35 +425,35 @@ function EntryFlow({ onEnter, initialStage = "landing" }: { onEnter: (mode: Laun
   }
 
   const onboardingData = step === 1 ? {
-    eyebrow: "CHOOSE YOUR MISSION",
-    title: "What are we forging?",
-    copy: "One priority. Everything else supports it.",
+    eyebrow: "Your goal",
+    title: "What are you training for?",
+    copy: "Choose one starting point. You can change it later.",
     options: [
-      ["Strength", "Build force. Own the big lifts.", "01"],
-      ["Muscle", "Add size with controlled volume.", "02"],
-      ["Hybrid", "Strength, swimming and capacity.", "03"],
+      ["Strength", "Get stronger in the lifts that matter to you.", "01"],
+      ["Muscle", "Build size with manageable weekly volume.", "02"],
+      ["Hybrid", "Balance strength with conditioning.", "03"],
     ],
     value: goal,
     setValue: setGoal,
   } : step === 2 ? {
-    eyebrow: "SET YOUR RHYTHM",
-    title: "How often do you train?",
-    copy: "Forge will shape the week around real life.",
+    eyebrow: "Your week",
+    title: "How often can you train?",
+    copy: "Pick the rhythm you can repeat on a normal week.",
     options: [
-      ["3 days", "Essential work. Maximum recovery.", "03"],
-      ["4 days", "Balanced strength split.", "04"],
-      ["5 days", "High-frequency progression.", "05"],
+      ["3 days", "Focused sessions with more recovery.", "03"],
+      ["4 days", "A balanced training week.", "04"],
+      ["5 days", "More frequent, shorter exposures.", "05"],
     ],
     value: days,
     setValue: setDays,
   } : {
-    eyebrow: "CALIBRATE YOUR COACH",
-    title: "How should Forge push?",
-    copy: "You can change this at any time.",
+    eyebrow: "Your guidance",
+    title: "How should the coach respond?",
+    copy: "Choose the tone you will actually listen to.",
     options: [
-      ["Protective", "Joint-first. Conservative progress.", "P"],
-      ["Balanced", "Push hard with smart guardrails.", "B"],
-      ["Relentless", "Performance first. Direct cues.", "R"],
+      ["Protective", "More caution around fatigue and joint stress.", "P"],
+      ["Balanced", "Direct guidance with sensible guardrails.", "B"],
+      ["Relentless", "Short, demanding cues with less reassurance.", "R"],
     ],
     value: coachStyle,
     setValue: setCoachStyle,
@@ -489,21 +461,21 @@ function EntryFlow({ onEnter, initialStage = "landing" }: { onEnter: (mode: Laun
 
   return (
     <div className="entry-shell onboarding-page">
-      <ForgeAmbience />
+      <ForgeAmbience density={18} />
       <header className="onboarding-nav">
         <button className="entry-brand" onClick={() => setStage("landing")}><strong>FORGE</strong></button>
-        <div className="onboarding-progress"><span>PROTOCOL</span><div>{[1,2,3].map((item) => <i className={item <= step ? "active" : ""} key={item} />)}</div><b>0{step} / 03</b></div>
-        <button className="onboarding-skip" onClick={() => onEnter("new")}>SKIP</button>
+        <div className="onboarding-progress"><span>Step</span><div>{[1,2,3].map((item) => <i className={item <= step ? "active" : ""} key={item} />)}</div><b>{step} of 3</b></div>
+        <button className="onboarding-skip" onClick={() => onEnter("new")}>Skip for now</button>
       </header>
       <main className="onboarding-stage">
         <div className="onboarding-copy">
           <span className="onboarding-step-mark">0{step}</span>
-          <p className="entry-eyebrow"><span>✦</span> {onboardingData.eyebrow}</p>
+          <p className="entry-eyebrow">{onboardingData.eyebrow}</p>
           <h1>{onboardingData.title}</h1>
           <p>{onboardingData.copy}</p>
           <div className="onboarding-principle">
-            <small>FORGE PRINCIPLE</small>
-            <p>{step === 1 ? "A clear mission removes wasted volume." : step === 2 ? "The best plan is the one your week can survive." : "Pressure works only when recovery can answer it."}</p>
+            <small>Why we ask</small>
+            <p>{step === 1 ? "A clear priority helps us remove work that does not serve you." : step === 2 ? "A plan only works when it fits the week you really have." : "Useful guidance should match how you prefer to make decisions."}</p>
           </div>
         </div>
         <div className="onboarding-decision">
@@ -514,18 +486,18 @@ function EntryFlow({ onEnter, initialStage = "landing" }: { onEnter: (mode: Laun
               </button>
             ))}
           </div>
-          <div className="onboarding-live-summary">
-            <span><small>MISSION</small><strong>{goal}</strong></span>
-            <span><small>RHYTHM</small><strong>{days}</strong></span>
-            <span><small>COACH</small><strong>{coachStyle}</strong></span>
+          <div className="onboarding-live-summary" aria-label="Your current choices">
+            <span><small>Goal</small><strong>{goal}</strong></span>
+            <span><small>Days</small><strong>{days}</strong></span>
+            <span><small>Coach</small><strong>{coachStyle}</strong></span>
           </div>
           <div className="onboarding-actions">
-            <button disabled={step === 1} onClick={() => setStep((current) => Math.max(1, current - 1))}>← BACK</button>
-            <button className="entry-primary" onClick={() => step < 3 ? setStep(step + 1) : onEnter("new")}>{step < 3 ? "LOCK & CONTINUE" : "IGNITE MY PLAN"} <span>→</span></button>
+            <button disabled={step === 1} onClick={() => setStep((current) => Math.max(1, current - 1))}>← Back</button>
+            <button className="entry-primary" onClick={() => step < 3 ? setStep(step + 1) : onEnter("new")}>{step < 3 ? "Continue" : "Build my plan"} <span>→</span></button>
           </div>
         </div>
       </main>
-      <footer className="onboarding-footer"><span>THE SPARTAN PROTOCOL</span><strong>Built around the athlete. Adjusted by the work.</strong></footer>
+      <footer className="onboarding-footer"><span>Nothing is permanent.</span><strong>You can change these choices later.</strong></footer>
     </div>
   );
 }
