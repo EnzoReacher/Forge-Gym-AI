@@ -1,0 +1,7 @@
+# Default ownership
+* @EnzoReacher
+
+# Changes with direct security or product-governance impact
+/.github/ @EnzoReacher
+/AGENTS.md @EnzoReacher
+/SECURITY.md @EnzoReacher

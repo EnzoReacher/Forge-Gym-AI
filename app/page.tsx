@@ -708,9 +708,10 @@ function Train({ exercises, setExercises, started, setStarted, startedAt, setSta
   const [view, setView] = useState<TrainView>("Session");
   const [libraryQuery, setLibraryQuery] = useState("");
   const [expanded, setExpanded] = useState("incline");
-  const [clock, setClock] = useState(Date.now());
+  const [clock, setClock] = useState(0);
   const [restEndAt, setRestEndAt] = useStoredState("forge-rest-end-at", 0);
   const [sessionNote, setSessionNote] = useStoredState("forge-session-note", "");
+  const [noteOpen, setNoteOpen] = useState(Boolean(sessionNote));
   const allSets = exercises.flatMap((exercise) => exercise.sets);
   const done = allSets.filter((set) => set.done);
   const progress = Math.round(done.length / allSets.length * 100);
@@ -723,10 +724,19 @@ function Train({ exercises, setExercises, started, setStarted, startedAt, setSta
   }, [setStartedAt, started, startedAt]);
 
   useEffect(() => {
-    if (!started && restEndAt <= Date.now()) return;
-    setClock(Date.now());
-    const id = window.setInterval(() => setClock(Date.now()), 1000);
-    return () => window.clearInterval(id);
+    if (!started && !restEndAt) return;
+    let id = 0;
+    const tick = () => {
+      const current = Date.now();
+      setClock(current);
+      if (!started && restEndAt <= current) window.clearInterval(id);
+    };
+    const initialTick = window.setTimeout(tick, 0);
+    id = window.setInterval(tick, 1000);
+    return () => {
+      window.clearTimeout(initialTick);
+      window.clearInterval(id);
+    };
   }, [restEndAt, started]);
 
   function ensureStarted() {
@@ -775,9 +785,10 @@ function Train({ exercises, setExercises, started, setStarted, startedAt, setSta
       return nextScore > currentScore ? item : current;
     }, completed[0]);
     const averageRir = completed.reduce((total, item) => total + (item.set.rir ?? 2), 0) / completed.length;
+    const completedAt = clock || startedAt;
     const summary: WorkoutSummary = {
-      id: Date.now(),
-      completedAt: Date.now(),
+      id: completedAt,
+      completedAt,
       title: "Upper strength",
       durationSeconds: Math.max(1, elapsedSeconds),
       completedSets: done.length,
@@ -793,7 +804,7 @@ function Train({ exercises, setExercises, started, setStarted, startedAt, setSta
     onFinish(summary);
   }
 
-  function useLibraryMove(move: LibraryMove) {
+  function selectLibraryMove(move: LibraryMove) {
     const existing = exercises.find((exercise) => exercise.name === move.name);
     if (existing) {
       setExpanded(existing.id);
@@ -875,7 +886,7 @@ function Train({ exercises, setExercises, started, setStarted, startedAt, setSta
                 : <button onClick={() => setRestEndAt(Date.now() + 120000)}>Start 2:00</button>}
             </div>
           </div>
-          <details className="session-note" defaultOpen={Boolean(sessionNote)}>
+          <details className="session-note" open={noteOpen} onToggle={(event) => setNoteOpen(event.currentTarget.open)}>
             <summary>{sessionNote ? "Edit session note" : "+ Add session note"}</summary>
             <textarea aria-label="Session note" value={sessionNote} onChange={(event) => setSessionNote(event.target.value)} placeholder="Technique, pain, energy, next adjustment…" />
           </details>
@@ -894,7 +905,7 @@ function Train({ exercises, setExercises, started, setStarted, startedAt, setSta
         <header><div><p className="eyebrow">EXERCISE LIBRARY</p><h2>Find it. Add it. Train.</h2></div><label className="library-search"><span>⌕</span><input aria-label="Search exercises" value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} placeholder="Search movement or muscle…" /></label></header>
         <div className="library-grid">{visibleLibrary.map((move) => {
           const inPlan = exercises.some((exercise) => exercise.name === move.name);
-          return <article key={move.name}><span>{move.target}</span><h3>{move.name}</h3><p>{move.role}</p><b>{move.cue}</b><button aria-label={`${inPlan ? "Open" : "Add"} ${move.name}`} onClick={() => useLibraryMove(move)}>{inPlan ? "OPEN" : "ADD"}</button></article>;
+          return <article key={move.name}><span>{move.target}</span><h3>{move.name}</h3><p>{move.role}</p><b>{move.cue}</b><button aria-label={`${inPlan ? "Open" : "Add"} ${move.name}`} onClick={() => selectLibraryMove(move)}>{inPlan ? "OPEN" : "ADD"}</button></article>;
         })}</div>
         {!visibleLibrary.length && <div className="library-empty"><strong>No movement found.</strong><span>Try a muscle group such as chest, back, or shoulders.</span></div>}
       </section>}
@@ -1058,8 +1069,9 @@ function Coach({ exercises, meals }: { exercises: Exercise[]; meals: Meal[] }) {
 
 function Progress({ exercises, history, workoutStarted, onTrain }: { exercises: Exercise[]; history: WorkoutSummary[]; workoutStarted: boolean; onTrain: () => void }) {
   const [range, setRange] = useState("12W");
+  const [referenceTime] = useState(Date.now);
   const rangeDays = range === "4W" ? 28 : range === "6M" ? 183 : 84;
-  const cutoff = Date.now() - rangeDays * 24 * 60 * 60 * 1000;
+  const cutoff = referenceTime - rangeDays * 24 * 60 * 60 * 1000;
   const filteredHistory = history.filter((session) => session.completedAt >= cutoff);
   const chartSessions = filteredHistory.slice(0, 12).reverse();
   const currentVolume = exercises.flatMap((exercise) => exercise.sets).filter((set) => set.done).reduce((total, set) => total + set.kg * set.reps, 0);
