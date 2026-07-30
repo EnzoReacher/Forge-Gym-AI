@@ -109,7 +109,7 @@ A redesigned screen does not ship until:
   latency, and elevated error rates.
 - Establish automated encrypted backups and a protected retention policy.
 - Complete and record a restore drill against a disposable environment.
-- Add release health checks and a documented rollback decision.
+- [x] Add release health checks and a documented rollback decision.
 - Review CSP, CORS, rate limits, privacy copy, dependency exposure, and incident
   response.
 - Obtain an independent security review appropriate to the collected data.
