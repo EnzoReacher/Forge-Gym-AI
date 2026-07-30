@@ -18,6 +18,24 @@ successful restore drill are recorded.
 Before public beta, backups must be automated, encrypted, access-controlled,
 and retained independently from the active database.
 
+## Reproducible local recovery rehearsal
+
+Run `npm run recovery:drill` after every schema migration and before a release
+that changes durable records. The rehearsal:
+
+- applies every checked-in migration to a disposable SQLite database;
+- creates synthetic fixtures for two owners, including identical record IDs;
+- snapshots and restores into a separate disposable database;
+- verifies SHA-256 checksum creation, table counts, database integrity, foreign
+  keys, suspended-account state, and owner-scoped update/delete behavior; and
+- destroys all temporary artifacts when it finishes.
+
+This catches migration and recovery regressions without accessing user data. It
+does not replace a restore from an encrypted managed backup into an
+access-restricted recovery environment. Only that managed drill can validate
+production credentials, provider snapshots, retention, encryption, measured
+RPO, and measured RTO.
+
 ## Backup requirements
 
 Each backup must include:

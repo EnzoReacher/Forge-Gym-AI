@@ -110,8 +110,12 @@ A redesigned screen does not ship until:
   record API failures, release health, latency, and elevated error rates.
 - [ ] Connect the alert policy to a hosted monitoring provider and verified
   primary and backup notification destinations.
-- Establish automated encrypted backups and a protected retention policy.
-- Complete and record a restore drill against a disposable environment.
+- [ ] Establish automated encrypted backups and a protected retention policy.
+- [x] Add a reproducible disposable restore rehearsal that applies every
+  migration, verifies checksums and table counts, and tests two-owner
+  isolation using synthetic data.
+- [ ] Complete and record a restore drill from a managed production backup
+  against an access-restricted disposable environment.
 - [x] Add release health checks and a documented rollback decision.
 - [x] Enforce exact-origin mutations, JSON request types, and durable
   per-account write limits for state and core records.

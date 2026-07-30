@@ -64,8 +64,10 @@ product does not need must not be collected.
 - The current account data model is a validated state store designed for the
   prototype. High-volume analytics and cross-device conflict resolution need a
   later relational model and versioning strategy.
-- Application-level rate limiting, backup restore drills, security monitoring,
-  and independent penetration testing remain required before public scale.
+- Managed encrypted backups, a production-backup restore drill, hosted alert
+  delivery, and independent penetration testing remain required before public
+  scale. The checked-in synthetic restore rehearsal covers migration and
+  owner-isolation regressions only.
 - Two-account isolation must be tested against the deployed runtime before
   opening the app beyond the current owner-only access policy.
 
