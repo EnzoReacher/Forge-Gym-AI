@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import {
   index,
+  integer,
+  primaryKey,
   sqliteTable,
   text,
   uniqueIndex,
@@ -63,5 +65,92 @@ export const auditEvents = sqliteTable(
   (table) => [
     index("audit_events_actor_idx").on(table.actorUserId),
     index("audit_events_created_idx").on(table.createdAt),
+  ],
+);
+
+export const workouts = sqliteTable(
+  "workouts",
+  {
+    id: text("id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    completedAt: integer("completed_at").notNull(),
+    title: text("title").notNull(),
+    durationSeconds: integer("duration_seconds").notNull(),
+    completedSets: integer("completed_sets").notNull(),
+    totalSets: integer("total_sets").notNull(),
+    exerciseCount: integer("exercise_count").notNull(),
+    volume: integer("volume").notNull(),
+    averageRir: integer("average_rir_milli").notNull(),
+    bestSet: text("best_set").notNull(),
+    note: text("note").notNull().default(""),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    correctedAt: text("corrected_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.id] }),
+    index("workouts_owner_completed_idx").on(table.userId, table.completedAt),
+  ],
+);
+
+export const workoutSets = sqliteTable(
+  "workout_sets",
+  {
+    id: text("id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    workoutId: text("workout_id").notNull(),
+    exerciseId: text("exercise_id").notNull(),
+    exerciseName: text("exercise_name").notNull(),
+    position: integer("position").notNull(),
+    weightGrams: integer("weight_grams").notNull(),
+    reps: integer("reps").notNull(),
+    rirMilli: integer("rir_milli").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.id] }),
+    index("workout_sets_owner_workout_idx").on(table.userId, table.workoutId),
+  ],
+);
+
+export const meals = sqliteTable(
+  "meals",
+  {
+    id: text("id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    recordedAt: integer("recorded_at").notNull(),
+    time: text("time").notNull(),
+    name: text("name").notNull(),
+    detail: text("detail").notNull().default(""),
+    kcal: integer("kcal").notNull(),
+    proteinGrams: integer("protein_grams").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    correctedAt: text("corrected_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.id] }),
+    index("meals_owner_recorded_idx").on(table.userId, table.recordedAt),
+  ],
+);
+
+export const hydrationEntries = sqliteTable(
+  "hydration_entries",
+  {
+    id: text("id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    recordedAt: integer("recorded_at").notNull(),
+    amountMl: integer("amount_ml").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    correctedAt: text("corrected_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.id] }),
+    index("hydration_owner_recorded_idx").on(table.userId, table.recordedAt),
   ],
 );

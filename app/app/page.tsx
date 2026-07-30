@@ -8,8 +8,9 @@ export default async function ForgeAppPage({
 }: {
   searchParams: Promise<{ welcome?: string }>;
 }) {
-  const user = await requireChatGPTUser("/app");
   const params = await searchParams;
+  const returnTo = params.welcome === "new" ? "/app?welcome=new" : "/app";
+  const user = await requireChatGPTUser(returnTo);
   const authenticatedUser: ForgeAuthenticatedUser = {
     displayName: user.displayName,
     email: user.email,

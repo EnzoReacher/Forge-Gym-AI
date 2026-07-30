@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
-import { Outfit } from "next/font/google";
 import "./globals.css";
 import "./workspace.css";
-const outfit=Outfit({variable:"--sans",subsets:["latin"],display:"swap"});
 export const metadata:Metadata={
   title:"Forge Gym AI",
   description:"Clear training, nutrition, recovery and progress guidance—built to stay out of your way.",
@@ -13,4 +11,4 @@ export const metadata:Metadata={
   },
   other:{"codex-preview":"development"}
 };
-export default function Layout({children}:{children:React.ReactNode}){return <html lang="vi"><body className={outfit.variable}>{children}</body></html>}
+export default function Layout({children}:{children:React.ReactNode}){return <html lang="en"><body>{children}</body></html>}

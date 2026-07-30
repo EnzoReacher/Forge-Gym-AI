@@ -11,7 +11,8 @@ async function source(path) {
 test("protected app requires a server-authenticated ChatGPT user", async () => {
   const protectedPage = await source("app/app/page.tsx");
 
-  assert.match(protectedPage, /requireChatGPTUser\("\/app"\)/);
+  assert.match(protectedPage, /const returnTo = params\.welcome === "new" \? "\/app\?welcome=new" : "\/app"/);
+  assert.match(protectedPage, /requireChatGPTUser\(returnTo\)/);
   assert.match(protectedPage, /dynamic\s*=\s*"force-dynamic"/);
 });
 
@@ -40,6 +41,27 @@ test("the primary sign-in screen never collects a password", async () => {
 
   assert.doesNotMatch(page, /type="password"/);
   assert.match(page, /Continue with ChatGPT/);
+  assert.match(page, /window\.location\.assign\(returnTo\)/);
+  assert.doesNotMatch(page, /window\.location\.assign\(`\/signin-with-chatgpt/);
+});
+
+test("expired and restricted sessions have explicit recovery states", async () => {
+  const page = await source("app/page.tsx");
+
+  assert.match(page, /status === 401[\s\S]*return "session"/);
+  assert.match(page, /status === 403[\s\S]*return "access"/);
+  assert.match(page, /Your session has ended\. Sign in again to continue\./);
+  assert.match(page, /This account cannot access FORGE right now\./);
+  assert.match(page, /Your saved data has not been changed\./);
+});
+
+test("opening an account does not rewrite unchanged state", async () => {
+  const page = await source("app/page.tsx");
+
+  assert.match(page, /const \[dirty, setDirty\] = useState\(false\)/);
+  assert.match(page, /if \(!ready \|\| !dirty \|\| \(accountBacked && loadError\)\) return/);
+  assert.match(page, /const updateValue:[\s\S]*setDirty\(true\)/);
+  assert.match(page, /setDirty\(false\)[\s\S]*setSyncError\(null\)/);
 });
 
 test("durable account state uses the managed D1 binding", async () => {

@@ -15,6 +15,14 @@ recoverable before making it larger.
   stored values remain separate.
 - [x] Emit fixed-shape operational events without identity, request bodies, or
   saved state.
+- [x] Route entry through the protected `/app` page so an existing ChatGPT
+  session is reused and anonymous visitors are redirected by the server-owned
+  sign-in gate without starting a redundant second sign-in.
+- [x] Distinguish expired sessions, restricted accounts, and temporary service
+  failures so the user gets a safe, specific recovery action instead of a
+  generic dead end.
+- [x] Avoid rewriting unchanged account state on every app open; only
+  user-initiated changes enter the sync and retry path.
 - [ ] Run the deployed two-account isolation matrix before widening access.
 - [ ] Verify sign-in, sign-out, expired sessions, suspension, and recovery
   against the deployed runtime.
@@ -66,18 +74,34 @@ A redesigned screen does not ship until:
 - [x] Phase 1: replace the accumulated landing, login, onboarding, and
   cinematic-entry layers with one direct, restrained entry system.
 - [x] Phase 2: apply the same rules to Today, Train, Fuel, Coach, and Progress.
-- [ ] Phase 3: complete keyboard, reduced-motion, mobile, and beginner
+- [x] Phase 3: complete keyboard, reduced-motion, mobile, and beginner
   comprehension checks across the whole athlete flow.
 
 ## Next — trustworthy core records
 
-- Model workouts, sets, meals, hydration, and progress as durable records rather
-  than a growing collection of JSON state keys.
-- Add optimistic updates with conflict handling and interrupted-session
-  recovery.
-- Add user-facing correction, export, and deletion.
-- Replace remaining demonstrative metrics with account-owned records.
-- Test weak connections, retries, partial failure, and safe recovery.
+- [x] Model completed workouts, individual sets, meals, hydration changes, and
+  progress as owner-scoped durable records.
+- [x] Add optimistic record creation/deletion, idempotent retry, and automatic
+  retry when the connection returns.
+- [x] Keep unsynced record mutations in a bounded, temporary per-tab queue,
+  replay them sequentially after reload or reconnection, restore their
+  optimistic result only after the account record list loads, and remove the
+  queue immediately after the server confirms every mutation.
+- [x] Keep multi-table workout creation, correction, set replacement, audit,
+  and deletion atomic so a partial database failure cannot split a workout
+  from its sets or correction history.
+- [x] Preserve older account state through an idempotent record migration.
+- [x] Add account-record export and deliberate workout/meal deletion.
+- [x] Add full owner-scoped correction for completed workouts, individual
+  sets, meals, and hydration entries. Corrections keep the original record ID,
+  recalculate derived workout metrics, record a correction timestamp, and emit
+  a minimal audit event instead of deleting and recreating history.
+- [x] Replace remaining demonstrative metrics with account-owned records or
+  explicit, plainly labelled defaults and planning previews.
+- [x] Remove invented starter-workout loads; new athletes choose their own
+  comfortable load before FORGE records it.
+- [ ] Complete deployed browser-level weak connection, partial failure, and
+  interrupted-session recovery checks.
 
 ## Operations before wider access
 

@@ -27,7 +27,7 @@ function attachRequestId(response, requestId) {
  * request ID. User identity, state values, request bodies, and URLs are never
  * accepted as telemetry fields.
  *
- * @param {"account_state_read" | "account_state_write"} event
+ * @param {"account_state_read" | "account_state_write" | "account_records_read" | "account_records_write" | "account_records_delete"} event
  * @param {() => Promise<Response>} handler
  * @param {() => Response} failureResponse
  */

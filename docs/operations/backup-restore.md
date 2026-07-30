@@ -23,7 +23,8 @@ and retained independently from the active database.
 Each backup must include:
 
 - Database schema and migration history.
-- Users, account state, and audit records.
+- Users, account state, workouts, workout sets, meals, hydration entries, and
+  audit records.
 - Creation time, source environment, release version, and schema version.
 - A cryptographic checksum.
 - Row counts for each included table.
