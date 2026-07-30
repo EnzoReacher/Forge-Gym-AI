@@ -1,10 +1,31 @@
 const SOURCE = "forge-web";
+const SLOW_REQUEST_MS = 1_500;
+const VERY_SLOW_REQUEST_MS = 3_000;
+
+export function classifyOperationalEvent(event, status, durationMs) {
+  if (status >= 500) {
+    return { severity: "error", signal: "service_failure" };
+  }
+  if (durationMs >= VERY_SLOW_REQUEST_MS) {
+    return { severity: "error", signal: "latency" };
+  }
+  if (durationMs >= SLOW_REQUEST_MS) {
+    return { severity: "warning", signal: "latency" };
+  }
+  if ((status === 401 || status === 403) && event !== "release_health") {
+    return { severity: "notice", signal: "auth_failure" };
+  }
+  if (status >= 400) {
+    return { severity: "notice", signal: "client_rejection" };
+  }
+  return { severity: "info", signal: "none" };
+}
 
 function writeOperationalEvent(entry) {
   const serialized = JSON.stringify(entry);
-  if (entry.status >= 500) {
+  if (entry.severity === "error") {
     console.error(serialized);
-  } else if (entry.status >= 400) {
+  } else if (entry.severity === "warning" || entry.severity === "notice") {
     console.warn(serialized);
   } else {
     console.info(serialized);
@@ -37,23 +58,29 @@ export async function observeApiRequest(event, handler, failureResponse) {
 
   try {
     const response = await handler();
+    const durationMs = Date.now() - startedAt;
+    const classification = classifyOperationalEvent(event, response.status, durationMs);
     writeOperationalEvent({
       source: SOURCE,
       event,
       outcome: response.status < 500 ? "completed" : "failed",
       status: response.status,
-      durationMs: Date.now() - startedAt,
+      durationMs,
+      ...classification,
       requestId,
     });
     return attachRequestId(response, requestId);
   } catch {
     const response = failureResponse();
+    const durationMs = Date.now() - startedAt;
+    const classification = classifyOperationalEvent(event, response.status, durationMs);
     writeOperationalEvent({
       source: SOURCE,
       event,
       outcome: "failed",
       status: response.status,
-      durationMs: Date.now() - startedAt,
+      durationMs,
+      ...classification,
       requestId,
     });
     return attachRequestId(response, requestId);

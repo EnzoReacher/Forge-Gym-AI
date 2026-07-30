@@ -105,8 +105,11 @@ A redesigned screen does not ship until:
 
 ## Operations before wider access
 
-- Define production alerts for authentication failures, state API failures,
-  latency, and elevated error rates.
+- [x] Define privacy-safe production alert signals, thresholds, resolution
+  conditions, and response actions for authentication failures, state and
+  record API failures, release health, latency, and elevated error rates.
+- [ ] Connect the alert policy to a hosted monitoring provider and verified
+  primary and backup notification destinations.
 - Establish automated encrypted backups and a protected retention policy.
 - Complete and record a restore drill against a disposable environment.
 - [x] Add release health checks and a documented rollback decision.
