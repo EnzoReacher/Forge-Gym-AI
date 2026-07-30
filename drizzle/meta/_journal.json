@@ -22,6 +22,13 @@
       "when": 1785375994555,
       "tag": "0002_hot_marvel_boy",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1785382849928,
+      "tag": "0003_fuzzy_james_howlett",
+      "breakpoints": true
     }
   ]
 }

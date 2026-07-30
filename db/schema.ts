@@ -68,6 +68,25 @@ export const auditEvents = sqliteTable(
   ],
 );
 
+export const requestLimits = sqliteTable(
+  "request_limits",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    action: text("action").notNull(),
+    windowStart: integer("window_start").notNull(),
+    count: integer("count").notNull().default(1),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.userId, table.action, table.windowStart],
+    }),
+    index("request_limits_window_idx").on(table.windowStart),
+  ],
+);
+
 export const workouts = sqliteTable(
   "workouts",
   {

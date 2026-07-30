@@ -69,7 +69,10 @@ test("server projection owns every workout and set regardless of client shape", 
 });
 
 test("records route authenticates and scopes reads, corrections, deletes, and exports", async () => {
-  const route = await readFile(new URL("../app/api/records/route.ts", import.meta.url), "utf8");
+  const [route, requestSecurity] = await Promise.all([
+    readFile(new URL("../app/api/records/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/request-security.mjs", import.meta.url), "utf8"),
+  ]);
   assert.match(route, /getChatGPTUser\(\)/);
   assert.match(route, /auth\.account\.id/);
   assert.match(route, /eq\(workouts\.userId, auth\.account\.id\)/);
@@ -78,7 +81,8 @@ test("records route authenticates and scopes reads, corrections, deletes, and ex
   assert.match(route, /Content-Disposition/);
   assert.match(route, /migrateLegacyRecords\(auth\.account\.id\)/);
   assert.match(route, /forge-record-migration-v1/);
-  assert.match(route, /Cross-site request blocked/);
+  assert.match(route, /mutationRequestProblem\(request/);
+  assert.match(requestSecurity, /Cross-site request blocked/);
   assert.match(route, /export async function PATCH/);
   assert.match(route, /account_record_corrected/);
   assert.match(route, /eq\(workouts\.id, record\.id\)/);

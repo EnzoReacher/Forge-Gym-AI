@@ -113,8 +113,9 @@ A redesigned screen does not ship until:
 - Establish automated encrypted backups and a protected retention policy.
 - Complete and record a restore drill against a disposable environment.
 - [x] Add release health checks and a documented rollback decision.
-- Review CSP, CORS, rate limits, privacy copy, dependency exposure, and incident
-  response.
+- [x] Enforce exact-origin mutations, JSON request types, and durable
+  per-account write limits for state and core records.
+- [ ] Review CSP, privacy copy, dependency exposure, and incident response.
 - Obtain an independent security review appropriate to the collected data.
 
 ## Later — only after the foundations pass

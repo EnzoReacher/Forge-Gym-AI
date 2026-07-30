@@ -4,6 +4,7 @@ import {
   auditEvents,
   hydrationEntries,
   meals,
+  requestLimits,
   userData,
   users,
   workouts,
@@ -11,6 +12,11 @@ import {
 } from "../../../db/schema";
 import { getChatGPTUser } from "../../chatgpt-auth";
 import { observeApiRequest } from "../../operational-events.mjs";
+import {
+  consumeAccountWriteLimit,
+  mutationRequestProblem,
+  rateLimitHeaders,
+} from "../request-security.mjs";
 import {
   publicHydration,
   publicMeal,
@@ -22,6 +28,8 @@ import {
 
 const MAX_BODY_BYTES = 120_000;
 const LEGACY_MIGRATION_KEY = "forge-record-migration-v1";
+const RECORD_CREATE_LIMIT = 180;
+const RECORD_CHANGE_LIMIT = 60;
 type Account = typeof users.$inferSelect;
 
 function json(body: unknown, status = 200, headers: HeadersInit = {}) {
@@ -76,11 +84,6 @@ async function readPayload(request: Request) {
   } catch {
     return { error: json({ error: "Invalid JSON payload." }, 400) };
   }
-}
-
-function sameOrigin(request: Request) {
-  const origin = request.headers.get("origin");
-  return !origin || origin === new URL(request.url).origin;
 }
 
 async function listRecords(ownerId: string) {
@@ -232,17 +235,33 @@ export async function POST(request: Request) {
   return observeApiRequest(
     "account_records_write",
     async () => {
-      if (!sameOrigin(request)) return json({ error: "Cross-site request blocked." }, 403);
+      const requestProblem = mutationRequestProblem(request, { requiresJson: true });
+      if (requestProblem) return json({ error: requestProblem.error }, requestProblem.status);
+
+      const auth = await currentAccount();
+      if ("response" in auth) return auth.response;
+      const db = await getDb();
+      const writeLimit = await consumeAccountWriteLimit({
+        db,
+        table: requestLimits,
+        ownerId: auth.account.id,
+        action: "account_records_create",
+        limit: RECORD_CREATE_LIMIT,
+      });
+      if (!writeLimit.allowed) {
+        return json(
+          { error: "Too many new records. Try again shortly." },
+          429,
+          rateLimitHeaders(writeLimit),
+        );
+      }
+
       const payload = await readPayload(request);
       if ("error" in payload) return payload.error;
       const value = payload.value as { type?: unknown; record?: unknown };
       if (!value || typeof value !== "object" || typeof value.type !== "string" || !validRecord(value.type, value.record)) {
         return json({ error: "Invalid record payload." }, 400);
       }
-
-      const auth = await currentAccount();
-      if ("response" in auth) return auth.response;
-      const db = await getDb();
 
       if (value.type === "workout") {
         const rows = workoutRows(auth.account.id, value.record);
@@ -285,7 +304,27 @@ export async function PATCH(request: Request) {
   return observeApiRequest(
     "account_records_write",
     async () => {
-      if (!sameOrigin(request)) return json({ error: "Cross-site request blocked." }, 403);
+      const requestProblem = mutationRequestProblem(request, { requiresJson: true });
+      if (requestProblem) return json({ error: requestProblem.error }, requestProblem.status);
+
+      const auth = await currentAccount();
+      if ("response" in auth) return auth.response;
+      const db = await getDb();
+      const writeLimit = await consumeAccountWriteLimit({
+        db,
+        table: requestLimits,
+        ownerId: auth.account.id,
+        action: "account_records_change",
+        limit: RECORD_CHANGE_LIMIT,
+      });
+      if (!writeLimit.allowed) {
+        return json(
+          { error: "Too many record changes. Try again shortly." },
+          429,
+          rateLimitHeaders(writeLimit),
+        );
+      }
+
       const payload = await readPayload(request);
       if ("error" in payload) return payload.error;
       const value = payload.value as { type?: unknown; record?: unknown };
@@ -293,9 +332,6 @@ export async function PATCH(request: Request) {
         return json({ error: "Invalid record correction." }, 400);
       }
 
-      const auth = await currentAccount();
-      if ("response" in auth) return auth.response;
-      const db = await getDb();
       const record = value.record as { id: string };
       const correctedAt = new Date().toISOString();
       const audit = {
@@ -400,7 +436,9 @@ export async function DELETE(request: Request) {
   return observeApiRequest(
     "account_records_delete",
     async () => {
-      if (!sameOrigin(request)) return json({ error: "Cross-site request blocked." }, 403);
+      const requestProblem = mutationRequestProblem(request);
+      if (requestProblem) return json({ error: requestProblem.error }, requestProblem.status);
+
       const url = new URL(request.url);
       const type = url.searchParams.get("type") ?? "";
       const id = url.searchParams.get("id") ?? "";
@@ -409,6 +447,20 @@ export async function DELETE(request: Request) {
       const auth = await currentAccount();
       if ("response" in auth) return auth.response;
       const db = await getDb();
+      const writeLimit = await consumeAccountWriteLimit({
+        db,
+        table: requestLimits,
+        ownerId: auth.account.id,
+        action: "account_records_change",
+        limit: RECORD_CHANGE_LIMIT,
+      });
+      if (!writeLimit.allowed) {
+        return json(
+          { error: "Too many record changes. Try again shortly." },
+          429,
+          rateLimitHeaders(writeLimit),
+        );
+      }
 
       if (type === "workout") {
         await db.batch([

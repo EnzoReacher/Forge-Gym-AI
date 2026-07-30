@@ -12,6 +12,9 @@ export function classifyOperationalEvent(event, status, durationMs) {
   if (durationMs >= SLOW_REQUEST_MS) {
     return { severity: "warning", signal: "latency" };
   }
+  if (status === 429) {
+    return { severity: "warning", signal: "rate_limit" };
+  }
   if ((status === 401 || status === 403) && event !== "release_health") {
     return { severity: "notice", signal: "auth_failure" };
   }

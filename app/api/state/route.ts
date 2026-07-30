@@ -1,8 +1,13 @@
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { userData, users } from "../../../db/schema";
+import { requestLimits, userData, users } from "../../../db/schema";
 import { getChatGPTUser } from "../../chatgpt-auth";
 import { observeApiRequest } from "../../operational-events.mjs";
+import {
+  consumeAccountWriteLimit,
+  mutationRequestProblem,
+  rateLimitHeaders,
+} from "../request-security.mjs";
 import {
   CorruptSavedStateError,
   loadAccountState,
@@ -20,15 +25,17 @@ const ALLOWED_KEYS = new Set([
 ]);
 
 const MAX_BODY_BYTES = 200_000;
+const STATE_WRITE_LIMIT = 120;
 
 type Account = typeof users.$inferSelect;
 
-function json(body: unknown, status = 200) {
+function json(body: unknown, status = 200, headers: HeadersInit = {}) {
   return Response.json(body, {
     status,
     headers: {
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
+      ...headers,
     },
   });
 }
@@ -217,8 +224,32 @@ export async function PUT(request: Request) {
   return observeApiRequest(
     "account_state_write",
     async () => {
+    const requestProblem = mutationRequestProblem(request, { requiresJson: true });
+    if (requestProblem) {
+      return json({ error: requestProblem.error }, requestProblem.status);
+    }
+
     const key = normalizedKey(request);
     if (!key) return json({ error: "Unsupported state key." }, 400);
+
+    const auth = await currentAccount();
+    if ("response" in auth) return auth.response;
+
+    const db = await getDb();
+    const writeLimit = await consumeAccountWriteLimit({
+      db,
+      table: requestLimits,
+      ownerId: auth.account.id,
+      action: "account_state_write",
+      limit: STATE_WRITE_LIMIT,
+    });
+    if (!writeLimit.allowed) {
+      return json(
+        { error: "Too many account updates. Try again shortly." },
+        429,
+        rateLimitHeaders(writeLimit),
+      );
+    }
 
     const contentLength = Number(request.headers.get("content-length") ?? 0);
     if (contentLength > MAX_BODY_BYTES) {
@@ -241,10 +272,6 @@ export async function PUT(request: Request) {
       return json({ error: "Invalid state payload." }, 400);
     }
 
-    const auth = await currentAccount();
-    if ("response" in auth) return auth.response;
-
-    const db = await getDb();
     await saveAccountState(
       {
         upsertForOwner: async (ownerId, stateKey, valueJson) => {
