@@ -54,6 +54,8 @@ product does not need must not be collected.
 | Stored script injection | React escapes rendered strings; server limits all user-controlled string lengths | Never render stored HTML without a dedicated sanitizer |
 | Accidental overwrite during an outage | Failed account loads block use and cannot write fallback data | Simulate failed reads before public release |
 | Sensitive error leakage | API responses are generic and do not expose stack traces, SQL, secrets, or internal errors | Review every new API response |
+| Browser injection and framing | Per-response nonce CSP, denied framing, restrictive permissions, no-referrer policy, and MIME sniffing protection | Built-worker response test checks every script nonce and security header |
+| Mutation abuse | Exact-origin checks, JSON-only mutations, validation, and durable per-account write limits | Request-boundary and rate-limit tests |
 | Excessive privilege in future admin tools | Admin remains out of scope until MFA, audit logs, monitoring, and explicit authorization exist | Admin release gate |
 | Dependency or CI supply-chain compromise | Locked dependencies, automated updates, least-privilege CI, and pinned GitHub Actions | CI and dependency review remain required |
 
@@ -70,6 +72,9 @@ product does not need must not be collected.
   owner-isolation regressions only.
 - Two-account isolation must be tested against the deployed runtime before
   opening the app beyond the current owner-only access policy.
+- The production dependency audit is currently clear. Development tooling still
+  has inherited findings documented in the dated dependency review and must run
+  without production secrets until compatible upstream fixes are available.
 
 ## Release gates
 
@@ -81,7 +86,7 @@ Before widening access:
 3. Add monitored authentication and API failure signals without logging
    sensitive payloads.
 4. Define D1 backup, restoration, rollback, and retention procedures.
-5. Review CSP, CORS, abuse limits, and privacy copy.
+5. Publish the user-facing privacy notice and final retention details.
 6. Complete an independent security review appropriate to the data collected.
 
 Any high- or critical-severity finding blocks a public release.

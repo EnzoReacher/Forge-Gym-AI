@@ -29,5 +29,16 @@ test("renders development preview metadata", async () => {
     response.headers.get("content-type") ?? "",
     /^text\/html\b/i,
   );
-  assert.match(await response.text(), developmentPreviewMeta);
+  const csp = response.headers.get("content-security-policy") ?? "";
+  const nonce = csp.match(/'nonce-([^']+)'/)?.[1];
+  assert.ok(nonce);
+  assert.match(csp, /frame-ancestors 'none'/);
+  assert.equal(response.headers.get("x-frame-options"), "DENY");
+  assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+
+  const html = await response.text();
+  assert.match(html, developmentPreviewMeta);
+  for (const script of html.match(/<script\b[^>]*>/gi) ?? []) {
+    assert.match(script, new RegExp(`\\bnonce=["']${nonce}["']`));
+  }
 });

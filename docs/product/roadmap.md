@@ -119,8 +119,15 @@ A redesigned screen does not ship until:
 - [x] Add release health checks and a documented rollback decision.
 - [x] Enforce exact-origin mutations, JSON request types, and durable
   per-account write limits for state and core records.
-- [ ] Review CSP, privacy copy, dependency exposure, and incident response.
-- Obtain an independent security review appropriate to the collected data.
+- [x] Apply nonce-based CSP and restrictive browser security headers.
+- [x] Review and remediate production dependency exposure; document residual
+  development-toolchain risk.
+- [x] Define incident response, evidence handling, recovery, notification, and
+  closure criteria.
+- [x] Complete an internal data-minimization and privacy-control review.
+- [ ] Publish a user-facing privacy notice and final retention details before
+  wider access.
+- [ ] Obtain an independent security review appropriate to the collected data.
 
 ## Later — only after the foundations pass
 
