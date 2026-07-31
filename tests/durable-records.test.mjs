@@ -112,8 +112,9 @@ test("client uses durable records with optimistic retry, correction, export, and
   assert.match(page, /window\.addEventListener\("online", online\)/);
   assert.match(page, /window\.sessionStorage/);
   assert.match(page, /applyPendingMutations/);
-  assert.match(page, /sort\(\(a, b\) => a\.createdAt - b\.createdAt\)/);
-  assert.match(page, /while \(pending\.current\.size\)/);
+  assert.match(page, /drainPendingMutationQueue/);
+  assert.match(page, /withMutationTimeout/);
+  assert.match(page, /boundPendingMutationMap/);
   assert.match(page, /meal\.recordedAt >= todayTimestamp/);
   assert.match(page, /entry\.recordedAt >= todayTimestamp/);
   assert.match(page, /"Retry now"/);

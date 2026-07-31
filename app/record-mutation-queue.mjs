@@ -2,6 +2,7 @@ const STORAGE_KEY = "forge-pending-record-mutations-v1";
 const METHODS = new Set(["POST", "PATCH", "DELETE"]);
 const KINDS = new Set(["workout", "meal", "hydration"]);
 const MAX_PENDING = 40;
+export const RECORD_MUTATION_TIMEOUT_MS = 12_000;
 
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -51,11 +52,30 @@ export function validPendingMutation(value) {
     : safeRecord(value.type, value.record) && value.record.id === value.id;
 }
 
+export function boundedPendingMutations(mutations) {
+  return mutations
+    .filter(validPendingMutation)
+    .sort((left, right) => {
+      const timeDifference = left.createdAt - right.createdAt;
+      return timeDifference || left.key.localeCompare(right.key);
+    })
+    .slice(-MAX_PENDING);
+}
+
+export function boundPendingMutationMap(queue) {
+  const bounded = boundedPendingMutations([...queue.values()]);
+  queue.clear();
+  for (const mutation of bounded) {
+    queue.set(mutation.key, mutation);
+  }
+  return queue;
+}
+
 export function readPendingMutations(storage) {
   try {
     const parsed = JSON.parse(storage.getItem(STORAGE_KEY) ?? "[]");
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(validPendingMutation).slice(-MAX_PENDING);
+    return boundedPendingMutations(parsed);
   } catch {
     return [];
   }
@@ -69,9 +89,52 @@ export function writePendingMutations(storage, mutations) {
     }
     storage.setItem(
       STORAGE_KEY,
-      JSON.stringify(mutations.filter(validPendingMutation).slice(-MAX_PENDING)),
+      JSON.stringify(boundedPendingMutations(mutations)),
     );
   } catch {}
+}
+
+export async function withMutationTimeout(
+  run,
+  timeoutMs = RECORD_MUTATION_TIMEOUT_MS,
+) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("A positive mutation timeout is required.");
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await run(controller.signal);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function drainPendingMutationQueue(queue, execute, persist) {
+  while (queue.size) {
+    const mutation = [...queue.values()]
+      .sort((left, right) => {
+        const timeDifference = left.createdAt - right.createdAt;
+        return timeDifference || left.key.localeCompare(right.key);
+      })[0];
+
+    try {
+      await execute(mutation);
+    } catch (error) {
+      return { ok: false, error };
+    }
+
+    // A user may update the same record while the older request is in flight.
+    // Remove only the exact object that succeeded so a newer replacement with
+    // the same key remains queued and is sent next.
+    if (queue.get(mutation.key) === mutation) {
+      queue.delete(mutation.key);
+    }
+    persist();
+  }
+
+  return { ok: true };
 }
 
 function replaceRecord(records, record) {

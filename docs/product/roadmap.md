@@ -94,6 +94,9 @@ A redesigned screen does not ship until:
   replay them sequentially after reload or reconnection, restore their
   optimistic result only after the account record list loads, and remove the
   queue immediately after the server confirms every mutation.
+- [x] Bound each network attempt, keep the in-memory queue capped, stop safely
+  after a partial failure, and preserve a newer same-record edit when an older
+  in-flight request completes.
 - [x] Keep multi-table workout creation, correction, set replacement, audit,
   and deletion atomic so a partial database failure cannot split a workout
   from its sets or correction history.

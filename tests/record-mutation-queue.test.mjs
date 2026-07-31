@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   applyPendingMutations,
+  boundPendingMutationMap,
+  boundedPendingMutations,
+  drainPendingMutationQueue,
   pendingStorageKey,
   readPendingMutations,
   validPendingMutation,
+  withMutationTimeout,
   writePendingMutations,
 } from "../app/record-mutation-queue.mjs";
 
@@ -93,4 +97,124 @@ test("successful sync removes the temporary session queue", () => {
   assert.equal(readPendingMutations(storage).length, 1);
   writePendingMutations(storage, []);
   assert.equal(storage.getItem(pendingStorageKey()), null);
+});
+
+test("the in-memory queue keeps the newest forty safe mutations", () => {
+  const mutations = Array.from({ length: 45 }, (_, index) => ({
+    key: `create:meal:meal-${String(index).padStart(8, "0")}`,
+    method: "POST",
+    type: "meal",
+    id: `meal-${String(index).padStart(8, "0")}`,
+    record: {
+      ...meal,
+      id: `meal-${String(index).padStart(8, "0")}`,
+      name: `Meal ${index}`,
+    },
+    createdAt: index,
+  }));
+
+  const bounded = boundedPendingMutations(mutations);
+  assert.equal(bounded.length, 40);
+  assert.equal(bounded[0].createdAt, 5);
+  assert.equal(bounded.at(-1).createdAt, 44);
+
+  const queue = new Map(mutations.map((mutation) => [mutation.key, mutation]));
+  const originalReference = queue;
+  assert.equal(boundPendingMutationMap(queue), originalReference);
+  assert.equal(queue.size, 40);
+  assert.equal([...queue.values()][0].createdAt, 5);
+});
+
+test("a partial failure keeps the failed mutation and every later mutation", async () => {
+  const first = {
+    key: "create:meal:meal-12345678",
+    method: "POST",
+    type: "meal",
+    id: meal.id,
+    record: meal,
+    createdAt: 100,
+  };
+  const second = {
+    key: "delete:meal:meal-87654321",
+    method: "DELETE",
+    type: "meal",
+    id: "meal-87654321",
+    createdAt: 200,
+  };
+  const third = {
+    key: "delete:meal:meal-87654322",
+    method: "DELETE",
+    type: "meal",
+    id: "meal-87654322",
+    createdAt: 300,
+  };
+  const queue = new Map([
+    [first.key, first],
+    [second.key, second],
+    [third.key, third],
+  ]);
+  let persisted = 0;
+
+  const result = await drainPendingMutationQueue(
+    queue,
+    async (mutation) => {
+      if (mutation === second) throw new Error("network");
+    },
+    () => {
+      persisted += 1;
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.deepEqual([...queue.values()], [second, third]);
+  assert.equal(persisted, 1);
+});
+
+test("an in-flight success never deletes a newer replacement with the same key", async () => {
+  const original = {
+    key: "update:meal:meal-12345678",
+    method: "PATCH",
+    type: "meal",
+    id: meal.id,
+    record: { ...meal, name: "Original edit" },
+    createdAt: 100,
+  };
+  const replacement = {
+    ...original,
+    record: { ...meal, name: "Newer edit" },
+    createdAt: 200,
+  };
+  const queue = new Map([[original.key, original]]);
+  const sent = [];
+
+  const result = await drainPendingMutationQueue(
+    queue,
+    async (mutation) => {
+      sent.push(mutation.record.name);
+      if (mutation === original) queue.set(replacement.key, replacement);
+    },
+    () => {},
+  );
+
+  assert.deepEqual(result, { ok: true });
+  assert.deepEqual(sent, ["Original edit", "Newer edit"]);
+  assert.equal(queue.size, 0);
+});
+
+test("a hung mutation is aborted so a later retry can take ownership", async () => {
+  let observedAbort = false;
+
+  await assert.rejects(
+    withMutationTimeout(
+      (signal) => new Promise((resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          observedAbort = true;
+          reject(new DOMException("Timed out", "AbortError"));
+        }, { once: true });
+      }),
+      5,
+    ),
+    (error) => error instanceof DOMException && error.name === "AbortError",
+  );
+  assert.equal(observedAbort, true);
 });

@@ -3,7 +3,10 @@
 import { FormEvent, memo, useCallback, useEffect, useRef, useState } from "react";
 import {
   applyPendingMutations,
+  boundPendingMutationMap,
+  drainPendingMutationQueue,
   readPendingMutations,
+  withMutationTimeout,
   writePendingMutations,
 } from "./record-mutation-queue.mjs";
 
@@ -370,18 +373,22 @@ function useDurableRecords(accountBacked: boolean) {
   }, []);
 
   const executeMutation = useCallback(async (mutation: PendingRecordMutation) => {
-    const response = mutation.method === "DELETE"
-      ? await fetch(`/api/records?type=${encodeURIComponent(mutation.type)}&id=${encodeURIComponent(mutation.id)}`, {
-        method: "DELETE",
-        credentials: "same-origin",
-      })
-      : await fetch("/api/records", {
-        method: mutation.method,
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: mutation.type, record: mutation.record }),
-      });
-    if (!response.ok) throw new Error(accountIssueForStatus(response.status));
+    await withMutationTimeout(async (signal: AbortSignal) => {
+      const response = mutation.method === "DELETE"
+        ? await fetch(`/api/records?type=${encodeURIComponent(mutation.type)}&id=${encodeURIComponent(mutation.id)}`, {
+          method: "DELETE",
+          credentials: "same-origin",
+          signal,
+        })
+        : await fetch("/api/records", {
+          method: mutation.method,
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: mutation.type, record: mutation.record }),
+          signal,
+        });
+      if (!response.ok) throw new Error(accountIssueForStatus(response.status));
+    });
   }, []);
 
   const drainPending = useCallback(async () => {
@@ -389,18 +396,15 @@ function useDurableRecords(accountBacked: boolean) {
     draining.current = true;
     let failed = false;
     try {
-      while (pending.current.size) {
-        const mutation = [...pending.current.values()]
-          .sort((a, b) => a.createdAt - b.createdAt)[0];
-        try {
-          await executeMutation(mutation);
-          pending.current.delete(mutation.key);
-          persistPending();
-        } catch (error) {
-          failed = true;
-          setSyncError(accountIssueFromError(error));
-          return;
-        }
+      const result = await drainPendingMutationQueue(
+        pending.current,
+        executeMutation,
+        persistPending,
+      );
+      if (!result.ok) {
+        failed = true;
+        setSyncError(accountIssueFromError(result.error));
+        return;
       }
       setSyncError(null);
     } finally {
@@ -412,6 +416,7 @@ function useDurableRecords(accountBacked: boolean) {
   const runMutation = useCallback((mutation: PendingRecordMutation) => {
     if (!accountBacked) return;
     pending.current.set(mutation.key, mutation);
+    boundPendingMutationMap(pending.current);
     persistPending();
     void drainPending();
   }, [accountBacked, drainPending, persistPending]);
