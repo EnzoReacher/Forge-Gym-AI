@@ -28,6 +28,8 @@ recoverable before making it larger.
   when identity forwarding is unavailable.
 - [x] Add built-worker authentication contract tests for missing identity,
   returning accounts, and post-onboarding entry.
+- [x] Define a privacy-safe deployed authentication, two-account isolation,
+  deletion, and interrupted-request verification matrix.
 - [ ] Run the deployed two-account isolation matrix before widening access.
 - [ ] Verify sign-in, sign-out, expired sessions, suspension, and recovery
   against the deployed runtime.

@@ -24,7 +24,7 @@ security, data, billing, admin, or architecture decisions.
 
 ## Current status
 
-FORGE is currently an owner-only authenticated product prototype. It includes:
+FORGE is currently an owner-only authenticated private beta. It includes:
 
 - Landing, login, and onboarding journeys.
 - A short cinematic transition after successful entry.
@@ -34,15 +34,17 @@ FORGE is currently an owner-only authenticated product prototype. It includes:
 - Progress views based on completed sessions.
 - A responsive Spartan-inspired visual system with reduced-motion support.
 - ChatGPT-managed sign-in for the protected app route.
-- D1-backed account state scoped to the authenticated user.
+- D1-backed account state and durable records scoped to the authenticated user.
 - Server-owned account role, status, and plan foundations.
-- Input validation, account isolation tests, and privacy-safe operational
-  telemetry for account state.
+- Record correction, export, deliberate account deletion, and a public privacy
+  notice describing the current product.
+- Input validation, 58 automated checks, account-isolation coverage, and
+  privacy-safe operational telemetry.
 
-Some metrics and product areas remain demonstrative, and the current JSON state
-store is an intermediate model. Public multi-user access, payments,
-administrator operations, and production AI services must not be represented as
-complete until their release gates and security controls pass.
+Planning and coaching previews are explicitly labelled. Public multi-user
+access, payments, administrator operations, and production AI services must not
+be represented as complete until their release gates and security controls
+pass. Run `npm run release:status` for the current blockers.
 
 ## Technology
 
@@ -116,7 +118,10 @@ Before widening access:
 2. Test sign-in, sign-out, expired sessions, suspension, and recovery.
 3. Configure monitored alerts and automated encrypted backups.
 4. Complete a recorded restoration drill.
-5. Add privacy controls for access, correction, export, and deletion.
+5. Activate final scheduled retention and a dedicated privacy contact.
+
+The deployed verification procedure is in
+[`docs/security/deployed-auth-isolation-matrix.md`](./docs/security/deployed-auth-isolation-matrix.md).
 
 Never commit passwords, access tokens, private keys, payment credentials, or
 production environment values.
