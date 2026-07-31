@@ -904,7 +904,7 @@ export default function Home({
       : accountLoadIssue === "access"
         ? "This account cannot access FORGE right now."
         : "FORGE could not load your account. Your saved data has not been changed.";
-    return <div className="account-loading account-error" role="alert"><ForgeAmbience density={10} /><strong>FORGE</strong><span>{message}</span><button onClick={() => window.location.reload()}>{accountLoadIssue === "session" ? "Sign in again" : "Try again"}</button></div>;
+    return <div className="account-loading account-error" role="alert"><ForgeAmbience density={10} /><strong>FORGE</strong><span>{message}</span><button onClick={() => accountLoadIssue === "session" ? window.location.assign("/signout-with-chatgpt?return_to=%2F") : window.location.reload()}>{accountLoadIssue === "session" ? "Sign in again" : "Try again"}</button></div>;
   }
 
   return (

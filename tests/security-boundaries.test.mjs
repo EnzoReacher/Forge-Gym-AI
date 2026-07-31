@@ -8,11 +8,13 @@ async function source(path) {
   return readFile(new URL(path, root), "utf8");
 }
 
-test("protected app requires a server-authenticated ChatGPT user", async () => {
+test("protected app uses the platform-authenticated user without a second sign-in", async () => {
   const protectedPage = await source("app/app/page.tsx");
 
-  assert.match(protectedPage, /const returnTo = params\.welcome === "new" \? "\/app\?welcome=new" : "\/app"/);
-  assert.match(protectedPage, /requireChatGPTUser\(returnTo\)/);
+  assert.match(protectedPage, /getChatGPTUser\(\)/);
+  assert.doesNotMatch(protectedPage, /requireChatGPTUser/);
+  assert.match(protectedPage, /Your secure session is unavailable/);
+  assert.match(protectedPage, /\/signout-with-chatgpt\?return_to=%2F/);
   assert.match(protectedPage, /dynamic\s*=\s*"force-dynamic"/);
 });
 
@@ -53,6 +55,7 @@ test("expired and restricted sessions have explicit recovery states", async () =
   assert.match(page, /Your session has ended\. Sign in again to continue\./);
   assert.match(page, /This account cannot access FORGE right now\./);
   assert.match(page, /Your saved data has not been changed\./);
+  assert.match(page, /window\.location\.assign\("\/signout-with-chatgpt\?return_to=%2F"\)/);
 });
 
 test("opening an account does not rewrite unchanged state", async () => {

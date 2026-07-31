@@ -23,6 +23,11 @@ recoverable before making it larger.
   generic dead end.
 - [x] Avoid rewriting unchanged account state on every app open; only
   user-initiated changes enter the sync and retry path.
+- [x] Reuse the platform-authenticated identity on `/app` without starting a
+  redundant second ChatGPT sign-in, and provide a bounded session-reset path
+  when identity forwarding is unavailable.
+- [x] Add built-worker authentication contract tests for missing identity,
+  returning accounts, and post-onboarding entry.
 - [ ] Run the deployed two-account isolation matrix before widening access.
 - [ ] Verify sign-in, sign-out, expired sessions, suspension, and recovery
   against the deployed runtime.

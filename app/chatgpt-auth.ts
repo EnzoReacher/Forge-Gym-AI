@@ -1,5 +1,4 @@
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
 
 export type ChatGPTUser = {
   displayName: string;
@@ -17,9 +16,14 @@ const SIGN_OUT_PATH = "/signout-with-chatgpt";
 const CALLBACK_PATH = "/callback";
 
 export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get(USER_EMAIL_HEADER);
-  if (!email) return null;
+  return getChatGPTUserFromHeaders(await headers());
+}
+
+export function getChatGPTUserFromHeaders(
+  requestHeaders: Pick<Headers, "get">,
+): ChatGPTUser | null {
+  const email = requestHeaders.get(USER_EMAIL_HEADER)?.trim().toLowerCase();
+  if (!email || email.length > 254) return null;
 
   const encodedFullName = requestHeaders.get(USER_FULL_NAME_HEADER);
   const fullName =
@@ -33,15 +37,6 @@ export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
     email,
     fullName,
   };
-}
-
-export async function requireChatGPTUser(
-  returnTo: string,
-): Promise<ChatGPTUser> {
-  const user = await getChatGPTUser();
-  if (user) return user;
-
-  redirect(chatGPTSignInPath(returnTo));
 }
 
 export function chatGPTSignInPath(returnTo: string): string {
