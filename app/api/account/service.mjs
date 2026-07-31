@@ -9,10 +9,3 @@ export function validAccountDeletion(value) {
     value.confirmation === ACCOUNT_DELETE_CONFIRMATION
   );
 }
-
-export function deletedAccountEmail(id) {
-  if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) {
-    throw new Error("A valid deletion identifier is required.");
-  }
-  return `deleted+${id.toLowerCase()}@forge.invalid`;
-}

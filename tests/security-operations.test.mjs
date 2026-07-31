@@ -21,7 +21,8 @@ test("incident response covers the critical containment lifecycle", async () => 
 test("privacy review records minimization and wider-access gates", async () => {
   const doc = await read("../docs/security/privacy-review.md");
   assert.match(doc, /Passwords or authentication tokens/i);
-  assert.match(doc, /user-facing privacy notice/i);
+  assert.match(doc, /published at `\/privacy`/i);
+  assert.match(doc, /Scheduled enforcement/i);
   assert.match(doc, /owner-only/i);
 });
 

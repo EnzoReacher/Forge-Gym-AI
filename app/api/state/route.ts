@@ -1,6 +1,6 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, lt, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { requestLimits, userData, users } from "../../../db/schema";
+import { auditEvents, requestLimits, userData, users } from "../../../db/schema";
 import { getChatGPTUser } from "../../chatgpt-auth";
 import { observeApiRequest } from "../../operational-events.mjs";
 import {
@@ -8,6 +8,7 @@ import {
   mutationRequestProblem,
   rateLimitHeaders,
 } from "../request-security.mjs";
+import { auditRetentionCutoff } from "../retention.mjs";
 import {
   CorruptSavedStateError,
   loadAccountState,
@@ -236,6 +237,9 @@ export async function PUT(request: Request) {
     if ("response" in auth) return auth.response;
 
     const db = await getDb();
+    await db
+      .delete(auditEvents)
+      .where(lt(auditEvents.createdAt, auditRetentionCutoff()));
     const writeLimit = await consumeAccountWriteLimit({
       db,
       table: requestLimits,

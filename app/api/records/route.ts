@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, lt } from "drizzle-orm";
 import { getDb } from "../../../db";
 import {
   auditEvents,
@@ -17,6 +17,7 @@ import {
   mutationRequestProblem,
   rateLimitHeaders,
 } from "../request-security.mjs";
+import { auditRetentionCutoff } from "../retention.mjs";
 import {
   publicHydration,
   publicMeal,
@@ -241,6 +242,9 @@ export async function POST(request: Request) {
       const auth = await currentAccount();
       if ("response" in auth) return auth.response;
       const db = await getDb();
+      await db
+        .delete(auditEvents)
+        .where(lt(auditEvents.createdAt, auditRetentionCutoff()));
       const writeLimit = await consumeAccountWriteLimit({
         db,
         table: requestLimits,
@@ -310,6 +314,9 @@ export async function PATCH(request: Request) {
       const auth = await currentAccount();
       if ("response" in auth) return auth.response;
       const db = await getDb();
+      await db
+        .delete(auditEvents)
+        .where(lt(auditEvents.createdAt, auditRetentionCutoff()));
       const writeLimit = await consumeAccountWriteLimit({
         db,
         table: requestLimits,
@@ -447,6 +454,9 @@ export async function DELETE(request: Request) {
       const auth = await currentAccount();
       if ("response" in auth) return auth.response;
       const db = await getDb();
+      await db
+        .delete(auditEvents)
+        .where(lt(auditEvents.createdAt, auditRetentionCutoff()));
       const writeLimit = await consumeAccountWriteLimit({
         db,
         table: requestLimits,

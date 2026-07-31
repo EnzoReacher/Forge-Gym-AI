@@ -136,8 +136,12 @@ A redesigned screen does not ship until:
 - [x] Add deliberate self-service athlete account deletion that atomically
   purges account-owned data, removes direct identity, and preserves only a
   non-identifying security audit marker.
-- [ ] Publish a user-facing privacy notice and final retention details before
-  wider access.
+- [x] Publish a user-facing privacy notice that describes current collection,
+  controls, deletion, infrastructure, age boundary, and retention honestly.
+- [ ] Activate scheduled retention enforcement, managed backup expiry, and a
+  dedicated external privacy contact before wider access.
+- [ ] Add guardian consent, age-appropriate explanations, and youth safety
+  controls before offering FORGE to anyone under 18.
 - [ ] Obtain an independent security review appropriate to the collected data.
 
 ## Later — only after the foundations pass

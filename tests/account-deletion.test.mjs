@@ -4,7 +4,6 @@ import test from "node:test";
 
 import {
   ACCOUNT_DELETE_CONFIRMATION,
-  deletedAccountEmail,
   validAccountDeletion,
 } from "../app/api/account/service.mjs";
 
@@ -16,14 +15,7 @@ test("account deletion accepts only one exact confirmation field", () => {
   assert.equal(validAccountDeletion(null), false);
 });
 
-test("deleted account tombstones are non-identifying and validated", () => {
-  const value = deletedAccountEmail("123e4567-e89b-12d3-a456-426614174000");
-  assert.equal(value, "deleted+123e4567-e89b-12d3-a456-426614174000@forge.invalid");
-  assert.doesNotMatch(value, /example\.com/);
-  assert.throws(() => deletedAccountEmail("owner@example.com"), /valid deletion identifier/);
-});
-
-test("account deletion is authenticated, owner-derived, atomic, and anonymizing", async () => {
+test("account deletion is authenticated, owner-derived, atomic, and complete", async () => {
   const route = await readFile(
     new URL("../app/api/account/route.ts", import.meta.url),
     "utf8",
@@ -49,10 +41,10 @@ test("account deletion is authenticated, owner-derived, atomic, and anonymizing"
     );
   }
   assert.match(route, /action: "account_self_deleted"/);
+  assert.match(route, /actorUserId: null/);
   assert.match(route, /targetId: null/);
-  assert.match(route, /email: deletedAccountEmail\(deletionId\)/);
-  assert.match(route, /identityName: null/);
-  assert.match(route, /status: "deleted"/);
+  assert.match(route, /db\.delete\(users\)\.where\(eq\(users\.id, account\.id\)\)/);
+  assert.doesNotMatch(route, /deletedAccountEmail|deleted\+/);
   assert.doesNotMatch(route, /payload\.(userId|email|ownerId|targetId)/);
   assert.doesNotMatch(route, /values\([\s\S]*identity\.email/);
 });

@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, lt } from "drizzle-orm";
 import { getDb } from "../../../db";
 import {
   auditEvents,
@@ -13,10 +13,8 @@ import {
 import { getChatGPTUser } from "../../chatgpt-auth";
 import { observeApiRequest } from "../../operational-events.mjs";
 import { mutationRequestProblem } from "../request-security.mjs";
-import {
-  deletedAccountEmail,
-  validAccountDeletion,
-} from "./service.mjs";
+import { auditRetentionCutoff } from "../retention.mjs";
+import { validAccountDeletion } from "./service.mjs";
 
 const MAX_BODY_BYTES = 1_024;
 
@@ -76,6 +74,9 @@ export async function DELETE(request: Request) {
       if ("error" in payload) return payload.error;
 
       const db = await getDb();
+      await db
+        .delete(auditEvents)
+        .where(lt(auditEvents.createdAt, auditRetentionCutoff()));
       const account = await db.query.users.findFirst({
         where: eq(users.email, email),
       });
@@ -90,7 +91,6 @@ export async function DELETE(request: Request) {
         );
       }
 
-      const deletionId = crypto.randomUUID();
       await db.batch([
         db.delete(workoutSets).where(eq(workoutSets.userId, account.id)),
         db.delete(workouts).where(eq(workouts.userId, account.id)),
@@ -100,23 +100,13 @@ export async function DELETE(request: Request) {
         db.delete(requestLimits).where(eq(requestLimits.userId, account.id)),
         db.insert(auditEvents).values({
           id: crypto.randomUUID(),
-          actorUserId: account.id,
+          actorUserId: null,
           action: "account_self_deleted",
           targetType: "account",
           targetId: null,
           reason: "Authenticated athlete completed deliberate self-service deletion.",
         }),
-        db
-          .update(users)
-          .set({
-            email: deletedAccountEmail(deletionId),
-            identityName: null,
-            role: "athlete",
-            status: "deleted",
-            plan: "free",
-            updatedAt: sql`CURRENT_TIMESTAMP`,
-          })
-          .where(eq(users.id, account.id)),
+        db.delete(users).where(eq(users.id, account.id)),
       ]);
 
       return json({ deleted: true });
