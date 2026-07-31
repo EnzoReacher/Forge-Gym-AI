@@ -1,8 +1,9 @@
 # FORGE account deletion
 
 Status: self-service deletion is implemented for athlete accounts and described
-in the public privacy notice. Final scheduled retention and managed backup
-expiry remain release gates.
+in the public privacy notice. A protected retention endpoint and manual
+operator workflow are implemented; final scheduling and managed backup expiry
+remain release gates.
 
 ## User contract
 
@@ -28,6 +29,9 @@ limit rows. It then deletes the account row itself.
 - Admin, support, and coach accounts cannot use athlete self-service deletion.
 - The audit marker contains no actor ID, email, name, request body, saved value,
   or account target ID.
+- Audit markers older than 90 days can be removed independently through the
+  fail-closed retention maintenance endpoint. Its automatic schedule remains
+  disabled until the activation checklist is verified.
 
 After a completed deletion, signing in again with the same platform identity
 creates a new empty athlete account. Deleted training data is not restored.

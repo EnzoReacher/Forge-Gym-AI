@@ -73,7 +73,7 @@ export default function PrivacyPage() {
           <div className="privacy-table" role="table" aria-label="FORGE data retention">
             <div role="row"><strong role="columnheader">Account and training data</strong><span role="cell">Kept while your account is active, or until you delete it.</span></div>
             <div role="row"><strong role="columnheader">Write-limit counters</strong><span role="cell">Short-lived protection windows; expired rows are cleared automatically during later writes.</span></div>
-            <div role="row"><strong role="columnheader">Security audit markers</strong><span role="cell">Eligible for deletion after 90 days and cleared during a later authenticated account change in the current private beta.</span></div>
+            <div role="row"><strong role="columnheader">Security audit markers</strong><span role="cell">Eligible for deletion after 90 days and cleared during a later authenticated account change or an authorized maintenance run in the current private beta.</span></div>
           </div>
           <p className="privacy-note">
             Scheduled retention enforcement and managed backup expiry must be

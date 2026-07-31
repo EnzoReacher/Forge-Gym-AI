@@ -140,6 +140,9 @@ A redesigned screen does not ship until:
   non-identifying security audit marker.
 - [x] Publish a user-facing privacy notice that describes current collection,
   controls, deletion, infrastructure, age boundary, and retention honestly.
+- [x] Add a fail-closed 90-day retention endpoint and dispatch-only operator
+  workflow so expired audit markers can be removed independently of user
+  activity without claiming that scheduling is active.
 - [ ] Activate scheduled retention enforcement, managed backup expiry, and a
   dedicated external privacy contact before wider access.
 - [ ] Add guardian consent, age-appropriate explanations, and youth safety
