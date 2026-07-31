@@ -1,1850 +1,14 @@
-"use client";
-
-import { FormEvent, memo, useCallback, useEffect, useRef, useState } from "react";
-import {
-  applyPendingMutations,
-  readPendingMutations,
-  writePendingMutations,
-} from "./record-mutation-queue.mjs";
-
-type Screen = "Today" | "Train" | "Fuel" | "Coach" | "Progress";
-type TrainView = "Session" | "Week" | "Library";
-type EntryStage = "landing" | "login" | "onboarding" | "app";
-type LaunchMode = "return" | "new";
-export type ForgeAuthenticatedUser = { displayName: string; email: string };
-type ForgeProfile = { displayName: string; units: "Metric" | "Imperial"; notifications: boolean };
-type SetLog = { kg: number; reps: number; rir?: number; done: boolean };
-type Exercise = { id: string; name: string; target: string; cue: string; sets: SetLog[] };
-type Meal = { id: string; recordedAt: number; time: string; name: string; detail: string; kcal: number; protein: number; correctedAt?: string | null };
-type WorkoutSetRecord = { id: string; exerciseId: string; exerciseName: string; position: number; kg: number; reps: number; rir: number };
-type WorkoutSummary = {
-  id: string;
-  completedAt: number;
-  title: string;
-  durationSeconds: number;
-  completedSets: number;
-  totalSets: number;
-  exerciseCount: number;
-  volume: number;
-  averageRir: number;
-  bestSet: string;
-  note: string;
-  sets: WorkoutSetRecord[];
-  correctedAt?: string | null;
-};
-type HydrationEntry = { id: string; recordedAt: number; amountMl: number; correctedAt?: string | null };
-type RecordKind = "workout" | "meal" | "hydration";
-type RecordValue = WorkoutSummary | Meal | HydrationEntry;
-type PendingRecordMutation = {
-  key: string;
-  method: "POST" | "PATCH" | "DELETE";
-  type: RecordKind;
-  id: string;
-  record?: RecordValue;
-  createdAt: number;
-};
-type AccountIssue = "session" | "access" | "unavailable" | null;
-type LibraryMove = {
-  target: string;
-  name: string;
-  role: string;
-  cue: string;
-  startKg: number;
-  reps: number;
-};
-type IconName = "home" | "train" | "fuel" | "coach" | "progress" | "search" | "plus";
-
-const nav: { name: Screen; icon: IconName }[] = [
-  { name: "Today", icon: "home" },
-  { name: "Train", icon: "train" },
-  { name: "Fuel", icon: "fuel" },
-  { name: "Coach", icon: "coach" },
-  { name: "Progress", icon: "progress" },
-];
-
-function ForgeIcon({ name }: { name: IconName }) {
-  const paths: Record<IconName, React.ReactNode> = {
-    home: <><path d="M3.5 10.5 12 3l8.5 7.5"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/></>,
-    train: <><path d="M6 7v10M18 7v10M3 9.5v5M21 9.5v5M6 12h12"/></>,
-    fuel: <><path d="M12 3c3.7 4 5.5 7.2 5.5 10a5.5 5.5 0 1 1-11 0c0-2.8 1.8-6 5.5-10Z"/><path d="M9.5 15.5c.6 1.2 1.4 1.8 2.5 1.8"/></>,
-    coach: <><path d="m12 3 1.4 5.1L18.5 9.5l-5.1 1.4L12 16l-1.4-5.1-5.1-1.4 5.1-1.4L12 3Z"/><path d="m18.5 15 .7 2.3 2.3.7-2.3.7-.7 2.3-.7-2.3-2.3-.7 2.3-.7.7-2.3Z"/></>,
-    progress: <><path d="M4 19V5"/><path d="M4 19h16"/><path d="m7 15 4-5 3 2 5-6"/></>,
-    search: <><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></>,
-    plus: <><path d="M12 5v14M5 12h14"/></>,
-  };
-  return <svg className="forge-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
-}
-
-function useModalA11y<T extends HTMLElement>(onClose: () => void) {
-  const containerRef = useRef<T>(null);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    const focusable = () => Array.from(container?.querySelectorAll<HTMLElement>(
-      'button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])',
-    ) ?? []).filter((element) => !element.hasAttribute("hidden"));
-
-    focusable()[0]?.focus();
-
-    function handleKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const items = focusable();
-      if (!items.length) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
-
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("keydown", handleKey);
-      document.body.style.overflow = previousOverflow;
-      previouslyFocused?.focus();
-    };
-  }, [onClose]);
-
-  return containerRef;
-}
-
-const forgeSparks = Array.from({ length: 120 }, (_, index) => ({
-  x: 8 + ((index * 29) % 91),
-  origin: 2 + ((index * 13) % 34),
-  drift: -360 + ((index * 97) % 720),
-  travel: 180 + ((index * 67) % 560),
-  size: 2 + (index % 4),
-  delay: -((index * 0.113) % 3.4),
-  duration: 1.55 + ((index * 0.071) % 1.75),
-}));
-
-const ForgeAmbience = memo(function ForgeAmbience({ density = 120 }: { density?: number }) {
-  return (
-    <div className="forge-ambience" aria-hidden="true">
-      <div className="forge-haze" />
-      <div className="hammer-flash" />
-      <div className="hammer-flash hammer-flash-echo" />
-      <div className="spark-field">
-        {forgeSparks.slice(0, density).map((spark, index) => <i key={index} style={{
-          "--spark-x": `${spark.x}%`,
-          "--spark-origin": `${spark.origin}%`,
-          "--spark-drift": `${spark.drift}px`,
-          "--spark-rise": `-${spark.travel}px`,
-          "--spark-size": `${spark.size}px`,
-          "--spark-delay": `${spark.delay}s`,
-          "--spark-duration": `${spark.duration}s`,
-        } as React.CSSProperties} />)}
-      </div>
-    </div>
-  );
-});
-
-function CinematicIntro({ mode, athleteName, onSkip }: { mode: LaunchMode; athleteName: string; onSkip: () => void }) {
-  useEffect(() => {
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onSkip();
-    };
-    document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
-  }, [onSkip]);
-
-  return (
-    <div
-      className={`cinematic-gate cinematic-${mode}`}
-      style={{ "--cinematic-duration": mode === "return" ? "1.05s" : "2.15s" } as React.CSSProperties}
-      aria-live="polite"
-      aria-labelledby="cinematic-title"
-      aria-describedby="cinematic-message"
-      role="dialog"
-      aria-modal="true"
-    >
-      <ForgeAmbience density={mode === "return" ? 16 : 24} />
-      <div className="cinematic-vignette" aria-hidden="true" />
-      <div className="cinematic-strike" aria-hidden="true" />
-      <div className="cinematic-mark">
-        <span>{mode === "return" ? `WELCOME BACK, ${athleteName.toUpperCase()}` : "YOUR PLAN IS READY"}</span>
-        <h1 id="cinematic-title">FORGE</h1>
-        <div className="cinematic-rule"><i /></div>
-        <p id="cinematic-message">{mode === "return" ? "LETâ€™S WORK." : "THE WORK IS YOURS."}</p>
-      </div>
-      <button className="cinematic-skip" onClick={onSkip} autoFocus>Skip intro</button>
-    </div>
-  );
-}
-
-function formatClock(totalSeconds: number) {
-  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
-  const minutes = Math.floor(safeSeconds / 60);
-  const seconds = safeSeconds % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-}
-
-function isSameLocalDay(timestamp: number, now = Date.now()) {
-  const recordDate = new Date(timestamp);
-  const currentDate = new Date(now);
-  return recordDate.getFullYear() === currentDate.getFullYear()
-    && recordDate.getMonth() === currentDate.getMonth()
-    && recordDate.getDate() === currentDate.getDate();
-}
-
-function accountIssueForStatus(status: number): Exclude<AccountIssue, null> {
-  if (status === 401) return "session";
-  if (status === 403) return "access";
-  return "unavailable";
-}
-
-function accountIssueFromError(error: unknown): Exclude<AccountIssue, null> {
-  if (error instanceof Error && ["session", "access", "unavailable"].includes(error.message)) {
-    return error.message as Exclude<AccountIssue, null>;
-  }
-  return "unavailable";
-}
-
-function dominantAccountIssue(issues: AccountIssue[]): AccountIssue {
-  if (issues.includes("session")) return "session";
-  if (issues.includes("access")) return "access";
-  if (issues.includes("unavailable")) return "unavailable";
-  return null;
-}
-
-function WorkoutComplete({ summary, onToday, onProgress }: { summary: WorkoutSummary; onToday: () => void; onProgress: () => void }) {
-  const dialogRef = useModalA11y<HTMLDivElement>(onToday);
-
-  return (
-    <div ref={dialogRef} className="workout-complete" role="dialog" aria-modal="true" aria-labelledby="workout-complete-title">
-      <ForgeAmbience density={28} />
-      <div className="completion-strike" aria-hidden="true" />
-      <section>
-        <p className="eyebrow hot">SESSION FORGED</p>
-        <span className="completion-mark">âœ¦</span>
-        <h2 id="workout-complete-title">The work is done.<br /><em>The standard remains.</em></h2>
-        <p className="completion-copy">Upper Strength is saved to your account. Recover, refuel, and return when you are ready.</p>
-        <div className="completion-stats">
-          <div><small>VOLUME</small><strong>{summary.volume.toLocaleString()}<em> kg</em></strong></div>
-          <div><small>WORKING SETS</small><strong>{summary.completedSets}<em> / {summary.totalSets}</em></strong></div>
-          <div><small>DURATION</small><strong>{formatClock(summary.durationSeconds)}</strong></div>
-          <div><small>REPS LEFT</small><strong>{summary.averageRir.toFixed(1)}</strong></div>
-        </div>
-        <div className="completion-best"><span>BEST SET</span><strong>{summary.bestSet}</strong></div>
-        <div className="completion-actions">
-          <button className="outline-action" onClick={onToday}>Back to today</button>
-          <button className="finish-action" onClick={onProgress}>View progress <span>â†’</span></button>
-        </div>
-        <small className="completion-protocol">SAVED TO YOUR ACCOUNT</small>
-      </section>
-    </div>
-  );
-}
-
-const initialExercises: Exercise[] = [
-  { id: "incline", name: "Incline dumbbell press", target: "Upper chest", cue: "Choose a comfortable load Â· use a pain-free range", sets: [{ kg: 0, reps: 8, done: false }, { kg: 0, reps: 8, done: false }, { kg: 0, reps: 8, done: false }] },
-  { id: "row", name: "Chest-supported row", target: "Back", cue: "Choose a comfortable load Â· keep the movement controlled", sets: [{ kg: 0, reps: 10, done: false }, { kg: 0, reps: 10, done: false }, { kg: 0, reps: 10, done: false }] },
-  { id: "shoulder", name: "Seated dumbbell press", target: "Shoulders", cue: "Choose a comfortable load Â· stop with 2 clean reps left", sets: [{ kg: 0, reps: 8, done: false }, { kg: 0, reps: 8, done: false }, { kg: 0, reps: 8, done: false }] },
-];
-
-const weekPlan = [
-  { day: "MON", date: "27", title: "Upper strength", focus: "Chest Â· Back", duration: "80 min", status: "today" },
-  { day: "TUE", date: "28", title: "Back width", focus: "Lats Â· Biceps", duration: "65 min", status: "next" },
-  { day: "WED", date: "29", title: "Chest control", focus: "Mid Â· Lower", duration: "60 min", status: "next" },
-  { day: "THU", date: "30", title: "Back thickness", focus: "Rows Â· Rear delts", duration: "70 min", status: "next" },
-  { day: "FRI", date: "31", title: "Shoulders & arms", focus: "Delts Â· Arms", duration: "60 min", status: "next" },
-  { day: "SAT", date: "01", title: "Recovery", focus: "Swim Â· Mobility", duration: "35 min", status: "rest" },
-  { day: "SUN", date: "02", title: "Full rest", focus: "Walk Â· Reset", duration: "â€”", status: "rest" },
-];
-
-const exerciseLibrary: LibraryMove[] = [
-  { target: "CHEST", name: "Incline dumbbell press", role: "Primary Â· Strength", cue: "Choose a comfortable load", startKg: 0, reps: 8 },
-  { target: "BACK", name: "Assisted pull-up", role: "Primary Â· Width", cue: "Use enough assistance for clean reps", startKg: 0, reps: 8 },
-  { target: "BACK", name: "Chest-supported row", role: "Primary Â· Thickness", cue: "Pause with control", startKg: 0, reps: 10 },
-  { target: "SHOULDERS", name: "Seated dumbbell press", role: "Primary Â· Strength", cue: "Stop with 2 clean reps left", startKg: 0, reps: 8 },
-  { target: "ARMS", name: "Cable triceps extension", role: "Accessory Â· Triceps", cue: "Move with control", startKg: 0, reps: 10 },
-  { target: "LEGS", name: "Hip abduction", role: "Accessory Â· Hips", cue: "Use a pain-free range", startKg: 0, reps: 12 },
-];
-
-function useStoredState<T>(key: string, fallback: T, accountBacked = false) {
-  const [value, setValue] = useState<T>(fallback);
-  const [ready, setReady] = useState(false);
-  const [dirty, setDirty] = useState(false);
-  const [loadError, setLoadError] = useState<AccountIssue>(null);
-  const [syncError, setSyncError] = useState<AccountIssue>(null);
-  const [retryNonce, setRetryNonce] = useState(0);
-  const updateValue: typeof setValue = useCallback((next) => {
-    setDirty(true);
-    setValue(next);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    if (accountBacked) {
-      fetch(`/api/state?key=${encodeURIComponent(key)}`, {
-        headers: { Accept: "application/json" },
-        credentials: "same-origin",
-      })
-        .then(async (response) => {
-          if (!response.ok) throw new Error(accountIssueForStatus(response.status));
-          return response.json() as Promise<{ value: T | null }>;
-        })
-        .then((payload) => {
-          if (!cancelled) {
-            setLoadError(null);
-            if (payload.value !== null) setValue(payload.value);
-          }
-        })
-        .catch((error) => {
-          if (!cancelled) setLoadError(accountIssueFromError(error));
-        })
-        .finally(() => {
-          if (!cancelled) setReady(true);
-        });
-
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    const frame = window.requestAnimationFrame(() => {
-      try {
-        const stored = window.localStorage.getItem(key);
-        if (stored) setValue(JSON.parse(stored));
-      } catch {}
-      setReady(true);
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [accountBacked, key]);
-
-  useEffect(() => {
-    if (!ready || !dirty || (accountBacked && loadError)) return;
-
-    if (accountBacked) {
-      const id = window.setTimeout(() => {
-        fetch(`/api/state?key=${encodeURIComponent(key)}`, {
-          method: "PUT",
-          credentials: "same-origin",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ value }),
-        })
-          .then((response) => {
-            if (!response.ok) throw new Error(accountIssueForStatus(response.status));
-            setDirty(false);
-            setSyncError(null);
-          })
-          .catch((error) => setSyncError(accountIssueFromError(error)));
-      }, 450);
-
-      return () => window.clearTimeout(id);
-    }
-
-    try { window.localStorage.setItem(key, JSON.stringify(value)); } catch {}
-  }, [accountBacked, dirty, key, loadError, ready, retryNonce, value]);
-
-  return [value, updateValue, ready, loadError, syncError, () => setRetryNonce((current) => current + 1)] as const;
-}
-
-function useDurableRecords(accountBacked: boolean) {
-  const [workouts, setWorkouts] = useState<WorkoutSummary[]>([]);
-  const [meals, setMeals] = useState<Meal[]>([]);
-  const [hydration, setHydration] = useState<HydrationEntry[]>([]);
-  const [ready, setReady] = useState(!accountBacked);
-  const [loadError, setLoadError] = useState<AccountIssue>(null);
-  const [syncError, setSyncError] = useState<AccountIssue>(null);
-  const pending = useRef(new Map<string, PendingRecordMutation>());
-  const draining = useRef(false);
-
-  const persistPending = useCallback(() => {
-    if (typeof window === "undefined") return;
-    writePendingMutations(window.sessionStorage, [...pending.current.values()]);
-  }, []);
-
-  const executeMutation = useCallback(async (mutation: PendingRecordMutation) => {
-    const response = mutation.method === "DELETE"
-      ? await fetch(`/api/records?type=${encodeURIComponent(mutation.type)}&id=${encodeURIComponent(mutation.id)}`, {
-        method: "DELETE",
-        credentials: "same-origin",
-      })
-      : await fetch("/api/records", {
-        method: mutation.method,
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: mutation.type, record: mutation.record }),
-      });
-    if (!response.ok) throw new Error(accountIssueForStatus(response.status));
-  }, []);
-
-  const drainPending = useCallback(async () => {
-    if (draining.current) return;
-    draining.current = true;
-    let failed = false;
-    try {
-      while (pending.current.size) {
-        const mutation = [...pending.current.values()]
-          .sort((a, b) => a.createdAt - b.createdAt)[0];
-        try {
-          await executeMutation(mutation);
-          pending.current.delete(mutation.key);
-          persistPending();
-        } catch (error) {
-          failed = true;
-          setSyncError(accountIssueFromError(error));
-          return;
-        }
-      }
-      setSyncError(null);
-    } finally {
-      draining.current = false;
-      if (!failed && pending.current.size) void drainPending();
-    }
-  }, [executeMutation, persistPending]);
-
-  const runMutation = useCallback((mutation: PendingRecordMutation) => {
-    if (!accountBacked) return;
-    pending.current.set(mutation.key, mutation);
-    persistPending();
-    void drainPending();
-  }, [accountBacked, drainPending, persistPending]);
-
-  const retry = drainPending;
-
-  useEffect(() => {
-    if (!accountBacked) return;
-    let cancelled = false;
-    const restored = readPendingMutations(window.sessionStorage) as PendingRecordMutation[];
-    pending.current = new Map(restored.map((mutation) => [mutation.key, mutation]));
-    writePendingMutations(window.sessionStorage, restored);
-    fetch("/api/records", {
-      headers: { Accept: "application/json" },
-      credentials: "same-origin",
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(accountIssueForStatus(response.status));
-        return response.json() as Promise<{ workouts: WorkoutSummary[]; meals: Meal[]; hydration: HydrationEntry[] }>;
-      })
-      .then((records) => {
-        if (cancelled) return;
-        const reconciled = applyPendingMutations(records, restored) as {
-          workouts: WorkoutSummary[];
-          meals: Meal[];
-          hydration: HydrationEntry[];
-        };
-        setWorkouts(reconciled.workouts);
-        setMeals(reconciled.meals);
-        setHydration(reconciled.hydration);
-        setLoadError(null);
-        if (restored.length) void retry();
-      })
-      .catch((error) => {
-        if (!cancelled) setLoadError(accountIssueFromError(error));
-      })
-      .finally(() => {
-        if (!cancelled) setReady(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [accountBacked, retry]);
-
-  useEffect(() => {
-    const online = () => void retry();
-    window.addEventListener("online", online);
-    return () => window.removeEventListener("online", online);
-  }, [retry]);
-
-  const addWorkout = useCallback((record: WorkoutSummary) => {
-    setWorkouts((current) => [record, ...current.filter((item) => item.id !== record.id)].slice(0, 100));
-    runMutation({ key: `create:workout:${record.id}`, method: "POST", type: "workout", id: record.id, record, createdAt: Date.now() });
-  }, [runMutation]);
-
-  const addMeal = useCallback((record: Meal) => {
-    setMeals((current) => [record, ...current.filter((item) => item.id !== record.id)].slice(0, 100));
-    runMutation({ key: `create:meal:${record.id}`, method: "POST", type: "meal", id: record.id, record, createdAt: Date.now() });
-  }, [runMutation]);
-
-  const addHydration = useCallback((record: HydrationEntry) => {
-    setHydration((current) => [record, ...current.filter((item) => item.id !== record.id)].slice(0, 200));
-    runMutation({ key: `create:hydration:${record.id}`, method: "POST", type: "hydration", id: record.id, record, createdAt: Date.now() });
-  }, [runMutation]);
-
-  const removeRecord = useCallback((type: RecordKind, id: string) => {
-    if (type === "workout") setWorkouts((current) => current.filter((item) => item.id !== id));
-    if (type === "meal") setMeals((current) => current.filter((item) => item.id !== id));
-    if (type === "hydration") setHydration((current) => current.filter((item) => item.id !== id));
-    runMutation({ key: `delete:${type}:${id}`, method: "DELETE", type, id, createdAt: Date.now() });
-  }, [runMutation]);
-
-  const updateRecord = useCallback((type: RecordKind, record: WorkoutSummary | Meal | HydrationEntry) => {
-    const corrected = { ...record, correctedAt: new Date().toISOString() };
-    if (type === "workout") {
-      setWorkouts((current) => current
-        .map((item) => item.id === record.id ? corrected as WorkoutSummary : item)
-        .sort((a, b) => b.completedAt - a.completedAt));
-    }
-    if (type === "meal") {
-      setMeals((current) => current
-        .map((item) => item.id === record.id ? corrected as Meal : item)
-        .sort((a, b) => b.recordedAt - a.recordedAt));
-    }
-    if (type === "hydration") {
-      setHydration((current) => current
-        .map((item) => item.id === record.id ? corrected as HydrationEntry : item)
-        .sort((a, b) => b.recordedAt - a.recordedAt));
-    }
-    runMutation({ key: `update:${type}:${record.id}`, method: "PATCH", type, id: record.id, record, createdAt: Date.now() });
-  }, [runMutation]);
-
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const todayTimestamp = todayStart.getTime();
-  const todayMeals = meals.filter((meal) => meal.recordedAt >= todayTimestamp);
-  const todayHydration = hydration.filter((entry) => entry.recordedAt >= todayTimestamp);
-
-  return {
-    workouts,
-    meals: todayMeals,
-    hydration: todayHydration,
-    water: Math.max(0, todayHydration.reduce((total, entry) => total + entry.amountMl, 0)),
-    ready,
-    loadError,
-    syncError,
-    retry,
-    addWorkout,
-    addMeal,
-    addHydration,
-    updateRecord,
-    removeRecord,
-  };
-}
-
-function EntryFlow({ onEnter, initialStage = "landing" }: { onEnter: (mode: LaunchMode) => void; initialStage?: Exclude<EntryStage, "app"> }) {
-  const [stage, setStage] = useState<Exclude<EntryStage, "app">>(initialStage);
-  const [step, setStep] = useState(1);
-  const [goal, setGoal] = useState("Strength");
-  const [days, setDays] = useState("5 days");
-  const [coachStyle, setCoachStyle] = useState("Balanced");
-
-  if (stage === "landing") {
-    return (
-      <div className="entry-shell landing-page">
-        <ForgeAmbience density={36} />
-        <header className="entry-nav">
-          <button className="entry-brand" aria-label="Forge home"><strong>FORGE</strong></button>
-          <nav className="landing-nav-links" aria-label="Landing navigation">
-            <a href="#how-it-works">How it works</a>
-            <a href="#inside-forge">Inside FORGE</a>
-          </nav>
-          <button className="entry-login-link" onClick={() => setStage("login")}>Sign in <span>â†—</span></button>
-        </header>
-
-        <main className="landing-main">
-          <section className="landing-hero">
-            <div className="landing-copy">
-              <p className="entry-eyebrow">Training, food, recovery, one clear place</p>
-              <h1>Know what to do.<br /><em>Then do the work.</em></h1>
-              <p className="landing-lead">FORGE keeps your plan, workout log, nutrition and progress togetherâ€”so you spend less time sorting data and more time building yourself.</p>
-              <div className="landing-actions">
-                <button className="entry-primary" onClick={() => setStage("onboarding")}>Set up my plan <span>â†’</span></button>
-                <a className="entry-ghost" href="#how-it-works">See how it works</a>
-              </div>
-              <div className="landing-proof" aria-label="What Forge helps with">
-                <div><strong>Today</strong><span>See the next useful action</span></div>
-                <div><strong>Train</strong><span>Log without leaving the flow</span></div>
-                <div><strong>Progress</strong><span>Learn what the work changed</span></div>
-              </div>
-            </div>
-
-            <div className="landing-monolith" aria-label="Example training day">
-              <div className="molten-edge" aria-hidden="true" />
-              <header><span>Example day</span><small>Tuesday</small></header>
-              <div className="monolith-session">
-                <small>Next session</small>
-                <h2>Upper strength</h2>
-                <p>Chest Â· Back Â· Shoulders</p>
-              </div>
-              <ol>
-                <li><span>01</span><p><strong>Incline press</strong><small>4 working sets</small></p></li>
-                <li><span>02</span><p><strong>Weighted pull-up</strong><small>3 working sets</small></p></li>
-                <li><span>03</span><p><strong>Shoulder press</strong><small>3 working sets</small></p></li>
-              </ol>
-              <footer><span>Plan ready</span><strong>Start when you are</strong></footer>
-            </div>
-          </section>
-
-          <section className="landing-system" id="how-it-works">
-            <header className="landing-section-head">
-              <p className="entry-eyebrow">How it works</p>
-              <div>
-                <h2>One loop you can understand.</h2>
-                <p>Open FORGE, see what matters, do the work and record the result. Tomorrow starts from what actually happened.</p>
-              </div>
-            </header>
-            <div className="system-rail">
-              {[
-                ["01", "Today", "Your recovery, schedule and next useful action."],
-                ["02", "Train", "Your plan and workout log in the same flow."],
-                ["03", "Fuel", "Meals, macros and hydration without spreadsheet noise."],
-                ["04", "Coach", "Guidance that uses the context you choose to share."],
-                ["05", "Progress", "Strength, body and consistency shown clearly."],
-              ].map(([number, title, copy]) => (
-                <article key={title}>
-                  <small>{number}</small>
-                  <h3>{title}</h3>
-                  <p>{copy}</p>
-                  <i aria-hidden="true">â€”</i>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="landing-command" id="inside-forge">
-            <div className="landing-command-copy">
-              <p className="entry-eyebrow">Built for the gym floor</p>
-              <h2>Less dashboard.<br />More direction.</h2>
-              <p>FORGE makes the next action obvious and keeps secondary detail out of your way until you need it.</p>
-              <ul>
-                <li><span>01</span>Start or adjust todayâ€™s session</li>
-                <li><span>02</span>Log sets, meals and water quickly</li>
-                <li><span>03</span>Review progress without vanity noise</li>
-              </ul>
-            </div>
-            <div className="command-ui" aria-label="Sample Forge workout">
-              <header><span>Sample workout</span><i>In progress</i></header>
-              <div className="command-greeting"><small>Upper strength</small><strong>Three movements left.</strong></div>
-              <div className="command-grid">
-                <article className="command-session">
-                  <small>Current movement</small>
-                  <h3>Incline dumbbell press</h3>
-                  <p>Full range Â· controlled tempo</p>
-                  <div><span>30 kg<small>Weight</small></span><span>8<small>Reps</small></span><span>2<small>Reps in reserve</small></span></div>
-                  <button onClick={() => setStage("onboarding")}>Build my plan <b>â†’</b></button>
-                </article>
-                <article className="command-score">
-                  <small>Why this matters</small>
-                  <strong>Clear<em>, not crowded</em></strong>
-                  <p>The controls you need stay close. Everything else waits.</p>
-                </article>
-              </div>
-            </div>
-          </section>
-
-          <section className="landing-intelligence">
-            <div className="landing-belief">
-              <p className="entry-eyebrow">The role of FORGE</p>
-              <h2>We stand beside you.<br />We do not do the work for you.</h2>
-              <p>FORGE helps make training easier to understand and easier to continue. Your effort, choices and consistency decide the outcome.</p>
-            </div>
-            <div className="landing-belief-lines">
-              <p><span>Train</span><strong>A plan you can follow today.</strong></p>
-              <p><span>Fuel</span><strong>Simple records you can correct.</strong></p>
-              <p><span>Coach</span><strong>Context when you need a second opinion.</strong></p>
-              <p><span>Progress</span><strong>Evidence of what changed over time.</strong></p>
-            </div>
-          </section>
-
-          <section className="landing-final">
-            <p className="entry-eyebrow">Start with one honest goal</p>
-            <h2>Build a plan that fits your life.</h2>
-            <p>Three short questions. You can change every answer later.</p>
-            <button className="entry-primary" onClick={() => setStage("onboarding")}>Set up FORGE <span>â†’</span></button>
-          </section>
-        </main>
-
-        <footer className="entry-footer landing-footer"><span>FORGE / 2026</span><i /><p>Built to support the work.</p></footer>
-      </div>
-    );
-  }
-
-  if (stage === "login") {
-    return (
-      <div className="entry-shell login-page">
-        <ForgeAmbience density={20} />
-        <button className="entry-back" onClick={() => setStage("landing")}>â† Back</button>
-        <button className="entry-brand login-brand" onClick={() => setStage("landing")} aria-label="Forge home"><strong>FORGE</strong></button>
-        <section className="login-manifesto">
-          <p className="entry-eyebrow">Welcome back</p>
-          <h1>Continue where<br /><em>you left off.</em></h1>
-          <blockquote>Your plan, records and progress stay with your accountâ€”not with this browser.</blockquote>
-          <div className="login-points">
-            <p><span>01</span><strong>One secure sign-in</strong><small>Use the same ChatGPT account you used before.</small></p>
-            <p><span>02</span><strong>No FORGE password</strong><small>FORGE never asks for or stores your password.</small></p>
-            <p><span>03</span><strong>Your work stays yours</strong><small>Account data is kept separate from other athletes.</small></p>
-          </div>
-        </section>
-        <section className="login-panel">
-          <div className="login-card">
-            <p className="login-index">Secure sign in</p>
-            <header><p><strong>Ready when you are.</strong><small>Continue with ChatGPT to open your FORGE account.</small></p></header>
-            <div className="secure-entry-copy">
-              <span>Before you continue</span>
-              <p>Check that the ChatGPT account in the sign-in window is the account you want attached to your training records.</p>
-            </div>
-            <button className="entry-primary secure-entry-action" onClick={() => onEnter("return")}>Continue with ChatGPT <span>â†’</span></button>
-            <small className="secure-entry-note">FORGE receives your verified identity. It does not receive your password.</small>
-            <footer>New to FORGE? <button onClick={() => setStage("onboarding")}>Set up your plan</button></footer>
-          </div>
-        </section>
-      </div>
-    );
-  }
-
-  const onboardingData = step === 1 ? {
-    eyebrow: "Your goal",
-    title: "What are you training for?",
-    copy: "Choose one starting point. You can change it later.",
-    options: [
-      ["Strength", "Get stronger in the lifts that matter to you.", "01"],
-      ["Muscle", "Build size with manageable weekly volume.", "02"],
-      ["Hybrid", "Balance strength with conditioning.", "03"],
-    ],
-    value: goal,
-    setValue: setGoal,
-  } : step === 2 ? {
-    eyebrow: "Your week",
-    title: "How often can you train?",
-    copy: "Pick the rhythm you can repeat on a normal week.",
-    options: [
-      ["3 days", "Focused sessions with more recovery.", "03"],
-      ["4 days", "A balanced training week.", "04"],
-      ["5 days", "More frequent, shorter exposures.", "05"],
-    ],
-    value: days,
-    setValue: setDays,
-  } : {
-    eyebrow: "Your guidance",
-    title: "How should the coach respond?",
-    copy: "Choose the tone you will actually listen to.",
-    options: [
-      ["Protective", "More caution around fatigue and joint stress.", "P"],
-      ["Balanced", "Direct guidance with sensible guardrails.", "B"],
-      ["Relentless", "Short, demanding cues with less reassurance.", "R"],
-    ],
-    value: coachStyle,
-    setValue: setCoachStyle,
-  };
-
-  return (
-    <div className="entry-shell onboarding-page">
-      <ForgeAmbience density={18} />
-      <header className="onboarding-nav">
-        <button className="entry-brand" onClick={() => setStage("landing")}><strong>FORGE</strong></button>
-        <div className="onboarding-progress"><span>Step</span><div>{[1,2,3].map((item) => <i className={item <= step ? "active" : ""} key={item} />)}</div><b>{step} of 3</b></div>
-        <button className="onboarding-skip" onClick={() => onEnter("new")}>Skip for now</button>
-      </header>
-      <main className="onboarding-stage">
-        <div className="onboarding-copy">
-          <span className="onboarding-step-mark">0{step}</span>
-          <p className="entry-eyebrow">{onboardingData.eyebrow}</p>
-          <h1>{onboardingData.title}</h1>
-          <p>{onboardingData.copy}</p>
-          <div className="onboarding-principle">
-            <small>Why we ask</small>
-            <p>{step === 1 ? "A clear priority helps us remove work that does not serve you." : step === 2 ? "A plan only works when it fits the week you really have." : "Useful guidance should match how you prefer to make decisions."}</p>
-          </div>
-        </div>
-        <div className="onboarding-decision">
-          <div className="onboarding-options">
-            {onboardingData.options.map(([name, copy, mark]) => (
-              <button className={onboardingData.value === name ? "selected" : ""} onClick={() => onboardingData.setValue(name)} key={name}>
-                <small>{mark}</small><span><strong>{name}</strong><em>{copy}</em></span><i>{onboardingData.value === name ? "âœ“" : "â—‹"}</i>
-              </button>
-            ))}
-          </div>
-          <div className="onboarding-live-summary" aria-label="Your current choices">
-            <span><small>Goal</small><strong>{goal}</strong></span>
-            <span><small>Days</small><strong>{days}</strong></span>
-            <span><small>Coach</small><strong>{coachStyle}</strong></span>
-          </div>
-          <div className="onboarding-actions">
-            <button disabled={step === 1} onClick={() => setStep((current) => Math.max(1, current - 1))}>â† Back</button>
-            <button className="entry-primary" onClick={() => step < 3 ? setStep(step + 1) : onEnter("new")}>{step < 3 ? "Continue" : "Build my plan"} <span>â†’</span></button>
-          </div>
-        </div>
-      </main>
-      <footer className="onboarding-footer"><span>Nothing is permanent.</span><strong>You can change these choices later.</strong></footer>
-    </div>
-  );
-}
-
-export default function Home({
-  initialEntryStage = "landing",
-  initialLaunchMode = null,
-  authenticatedUser = null,
-}: {
-  initialEntryStage?: EntryStage;
-  initialLaunchMode?: LaunchMode | null;
-  authenticatedUser?: ForgeAuthenticatedUser | null;
-}) {
-  const accountBacked = Boolean(authenticatedUser);
-  const identityName = authenticatedUser?.displayName?.trim() || "Athlete";
-  const defaultProfile: ForgeProfile = {
-    displayName: identityName,
-    units: "Metric",
-    notifications: true,
-  };
-  const [entryStage, setEntryStage] = useState<EntryStage>(initialEntryStage);
-  const [screen, setScreen] = useState<Screen>("Today");
-  const [exercises, setExercises, exercisesReady, exercisesLoadError, exercisesSyncError, retryExercises] = useStoredState("forge-exercises", initialExercises, accountBacked);
-  const [workoutStarted, setWorkoutStarted, workoutReady, workoutLoadError, workoutSyncError, retryWorkout] = useStoredState("forge-workout-live", false, accountBacked);
-  const [workoutStartedAt, setWorkoutStartedAt, startedAtReady, startedAtLoadError, startedAtSyncError, retryStartedAt] = useStoredState("forge-workout-started-at", 0, accountBacked);
-  const [profile, setProfile, profileReady, profileLoadError, profileSyncError, retryProfile] = useStoredState<ForgeProfile>("forge-profile", defaultProfile, accountBacked);
-  const records = useDurableRecords(accountBacked);
-  const [commandOpen, setCommandOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
-  const [toast, setToast] = useState("");
-  const [launchMode, setLaunchMode] = useState<LaunchMode | null>(initialLaunchMode);
-  const [finishSummary, setFinishSummary] = useState<WorkoutSummary | null>(null);
-  const { workouts: workoutHistory, meals, hydration, water } = records;
-  const accountReady = !accountBacked || [exercisesReady, workoutReady, startedAtReady, profileReady, records.ready].every(Boolean);
-  const accountLoadIssue = accountBacked
-    ? dominantAccountIssue([exercisesLoadError, workoutLoadError, startedAtLoadError, profileLoadError, records.loadError])
-    : null;
-  const accountSyncIssue = accountBacked
-    ? dominantAccountIssue([exercisesSyncError, workoutSyncError, startedAtSyncError, profileSyncError, records.syncError])
-    : null;
-  const athleteName = profile.displayName.trim().split(/\s+/)[0] || "Athlete";
-  const athleteInitial = athleteName.slice(0, 1).toUpperCase();
-
-  useEffect(() => {
-    const shortcut = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setCommandOpen((open) => !open);
-      }
-      if (event.key === "Escape") {
-        setCommandOpen(false);
-        setProfileOpen(false);
-      }
-    };
-    window.addEventListener("keydown", shortcut);
-    return () => window.removeEventListener("keydown", shortcut);
-  }, []);
-
-  useEffect(() => {
-    if (!toast) return;
-    const id = window.setTimeout(() => setToast(""), 2400);
-    return () => window.clearTimeout(id);
-  }, [toast]);
-
-  useEffect(() => {
-    if (!launchMode) return;
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const id = window.setTimeout(() => {
-      setEntryStage("app");
-      setLaunchMode(null);
-    }, reducedMotion ? 320 : launchMode === "return" ? 1050 : 2150);
-    return () => window.clearTimeout(id);
-  }, [launchMode]);
-
-  function go(next: Screen) {
-    setScreen(next);
-    setCommandOpen(false);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function startWorkout() {
-    const allSetsFinished = exercises.every((exercise) => exercise.sets.every((set) => set.done));
-    if (allSetsFinished) {
-      setExercises((current) => current.map((exercise) => ({
-        ...exercise,
-        sets: exercise.sets.map((set) => ({ ...set, done: false })),
-      })));
-    }
-    if (!workoutStarted || !workoutStartedAt) setWorkoutStartedAt(Date.now());
-    setWorkoutStarted(true);
-    go("Train");
-    setToast("Session started â€” make every rep count.");
-  }
-
-  function finishWorkout(summary: WorkoutSummary) {
-    records.addWorkout(summary);
-    setWorkoutStarted(false);
-    setWorkoutStartedAt(0);
-    setFinishSummary(summary);
-  }
-
-  function adjustWater(amountMl: number) {
-    const safeAmount = amountMl < 0 ? -Math.min(Math.abs(amountMl), water) : amountMl;
-    if (!safeAmount) return;
-    records.addHydration({
-      id: crypto.randomUUID(),
-      recordedAt: Date.now(),
-      amountMl: safeAmount,
-    });
-    setToast(safeAmount > 0 ? `${safeAmount} ml water logged.` : `${Math.abs(safeAmount)} ml removed.`);
-  }
-
-  if (entryStage !== "app" && !launchMode) {
-    return <EntryFlow
-      onEnter={(mode) => {
-        const returnTo = mode === "new" ? "/app?welcome=new" : "/app";
-        window.location.assign(returnTo);
-      }}
-      initialStage={entryStage}
-    />;
-  }
-
-  if (!accountReady) {
-    return <div className="account-loading" role="status" aria-live="polite"><ForgeAmbience density={14} /><strong>FORGE</strong><span>Loading your accountâ€¦</span></div>;
-  }
-
-  if (accountLoadIssue) {
-    const message = accountLoadIssue === "session"
-      ? "Your session has ended. Sign in again to continue."
-      : accountLoadIssue === "access"
-        ? "This account cannot access FORGE right now."
-        : "FORGE could not load your account. Your saved data has not been changed.";
-    return <div className="account-loading account-error" role="alert"><ForgeAmbience density={10} /><strong>FORGE</strong><span>{message}</span><button onClick={() => accountLoadIssue === "session" ? window.location.assign("/signout-with-chatgpt?return_to=%2F") : window.location.reload()}>{accountLoadIssue === "session" ? "Sign in again" : "Try again"}</button></div>;
-  }
-
-  return (
-    <>
-      <div className={`app-shell${launchMode ? " cinematic-underlay" : ""}`}>
-        <ForgeAmbience density={screen === "Today" ? 24 : 16} />
-        <header className="topbar">
-          <button className="wordmark" onClick={() => go("Today")} aria-label="Forge home">
-            <strong>FORGE</strong>
-          </button>
-          <nav className="desktop-nav" aria-label="Primary navigation">
-            {nav.map((item) => <button key={item.name} aria-current={screen === item.name ? "page" : undefined} className={screen === item.name ? "active" : ""} onClick={() => go(item.name)}><ForgeIcon name={item.icon}/><span>{item.name}</span></button>)}
-          </nav>
-          <div className="top-actions">
-            <button className="quick-command" onClick={() => setCommandOpen(true)} aria-label="Open quick actions"><ForgeIcon name="plus"/><span>Quick</span></button>
-            <button className="avatar" onClick={() => setProfileOpen(true)} aria-label="Open profile">{athleteInitial}</button>
-          </div>
-        </header>
-
-        <main className="workspace">
-          {screen === "Today" && <Today athleteName={athleteName} exercises={exercises} meals={meals} water={water} workoutStarted={workoutStarted} lastWorkout={workoutHistory[0]} onStart={startWorkout} onCoach={() => go("Coach")} onProgress={() => go("Progress")} />}
-          {screen === "Train" && <Train exercises={exercises} setExercises={setExercises} started={workoutStarted} setStarted={setWorkoutStarted} startedAt={workoutStartedAt} setStartedAt={setWorkoutStartedAt} onFinish={finishWorkout} notify={setToast} />}
-          {screen === "Fuel" && <Fuel
-            meals={meals}
-            hydration={hydration}
-            water={water}
-            onAddMeal={records.addMeal}
-            onUpdateMeal={(meal) => records.updateRecord("meal", meal)}
-            onRemoveMeal={(id) => records.removeRecord("meal", id)}
-            onUpdateHydration={(entry) => records.updateRecord("hydration", entry)}
-            onRemoveHydration={(id) => records.removeRecord("hydration", id)}
-            onAdjustWater={adjustWater}
-            notify={setToast}
-          />}
-          {screen === "Coach" && <Coach exercises={exercises} meals={meals} />}
-          {screen === "Progress" && <Progress
-            exercises={exercises}
-            history={workoutHistory}
-            workoutStarted={workoutStarted}
-            onTrain={() => go("Train")}
-            onUpdateWorkout={(workout) => records.updateRecord("workout", workout)}
-            onDeleteWorkout={(id) => records.removeRecord("workout", id)}
-          />}
-        </main>
-
-        <nav className="mobile-dock" aria-label="Mobile navigation">
-          {nav.map((item) => <button key={item.name} aria-current={screen === item.name ? "page" : undefined} className={screen === item.name ? "active" : ""} onClick={() => go(item.name)}><i><ForgeIcon name={item.icon}/></i><span>{item.name}</span></button>)}
-        </nav>
-
-        {commandOpen && <CommandPalette onClose={() => setCommandOpen(false)} go={go} startWorkout={startWorkout} addWater={() => { adjustWater(250); setCommandOpen(false); }} />}
-        {profileOpen && <ProfileDrawer
-          profile={profile}
-          email={authenticatedUser?.email ?? ""}
-          onSave={(next) => {
-            setProfile(next);
-            setProfileOpen(false);
-            setToast("Profile saved to your account.");
-          }}
-          onClose={() => setProfileOpen(false)}
-          onReplayLogin={() => {
-            setProfileOpen(false);
-            setLaunchMode("return");
-          }}
-          onReplayOnboarding={() => {
-            setProfileOpen(false);
-            setEntryStage("onboarding");
-          }}
-        />}
-        {toast && <div className="toast" role="status" aria-live="polite"><i>âœ“</i>{toast}</div>}
-        {accountSyncIssue && <div className="sync-warning" role={accountSyncIssue === "session" ? "alert" : "status"}><span>{
-          accountSyncIssue === "session"
-            ? "Your session ended. Sign in again before continuing."
-            : accountSyncIssue === "access"
-              ? "Account access is unavailable. New changes cannot sync."
-              : "Account sync paused. Your action is still shown here."
-        }</span><button onClick={() => {
-          if (accountSyncIssue === "session" || accountSyncIssue === "access") {
-            window.location.reload();
-            return;
-          }
-          retryExercises();
-          retryWorkout();
-          retryStartedAt();
-          retryProfile();
-          void records.retry();
-        }}>{accountSyncIssue === "session" ? "Sign in again" : accountSyncIssue === "access" ? "Reload account" : "Retry now"}</button></div>}
-      </div>
-      {finishSummary && <WorkoutComplete
-        summary={finishSummary}
-        onToday={() => {
-          setFinishSummary(null);
-          go("Today");
-        }}
-        onProgress={() => {
-          setFinishSummary(null);
-          go("Progress");
-        }}
-      />}
-      {launchMode && <CinematicIntro mode={launchMode} athleteName={athleteName} onSkip={() => {
-        setEntryStage("app");
-        setLaunchMode(null);
-      }} />}
-    </>
-  );
-}
-
-function Today({ athleteName, exercises, meals, water, workoutStarted, lastWorkout, onStart, onCoach, onProgress }: { athleteName: string; exercises: Exercise[]; meals: Meal[]; water: number; workoutStarted: boolean; lastWorkout?: WorkoutSummary; onStart: () => void; onCoach: () => void; onProgress: () => void }) {
-  const allSets = exercises.flatMap((exercise) => exercise.sets);
-  const doneSets = allSets.filter((set) => set.done);
-  const calories = meals.reduce((total, meal) => total + meal.kcal, 0);
-  const protein = meals.reduce((total, meal) => total + meal.protein, 0);
-  const volume = doneSets.reduce((total, set) => total + set.kg * set.reps, 0);
-  const completedToday = Boolean(lastWorkout && isSameLocalDay(lastWorkout.completedAt));
-  const sessionComplete = completedToday && !workoutStarted;
-  const sessionAction = sessionComplete ? "Review session" : workoutStarted ? "Resume workout" : "Start workout";
-  const nextMove = sessionComplete ? "Todayâ€™s workout is saved. Review it or focus on recovery." : workoutStarted ? "Continue from the next unfinished set." : "Your next planned workout is ready when you are.";
-
-  return (
-    <div className="screen today-screen">
-      <header className="today-intro">
-        <p className="eyebrow">Today</p>
-        <h1>Welcome back, {athleteName}.</h1>
-        <p>{nextMove}</p>
-      </header>
-
-      <div className="today-layout">
-        <section className="day-flow">
-          <article className={`session-focus${sessionComplete ? " complete" : ""}`}>
-            <div className="session-top">
-              <div>
-                <p className="eyebrow hot">{sessionComplete ? "Completed" : workoutStarted ? "Workout in progress" : "Your next move"}</p>
-                <h2>Upper strength</h2>
-                <span>{sessionComplete ? "Saved to your account" : "Chest Â· Back Â· Shoulders"}</span>
-              </div>
-              <span className="duration">{sessionComplete ? formatClock(lastWorkout!.durationSeconds) : workoutStarted ? `${doneSets.length}/${allSets.length} sets` : "45â€“60 min"}</span>
-            </div>
-
-            <div className="exercise-preview">
-              {exercises.slice(0, 3).map((item, index) => {
-                const completed = item.sets.filter((set) => set.done).length;
-                const plannedLoad = item.sets.at(-1)?.kg ?? 0;
-                return <div key={item.id}><span>0{index + 1}</span><p><strong>{item.name}</strong><small>{completed}/{item.sets.length} sets logged</small></p><b>{plannedLoad > 0 ? `${plannedLoad} kg` : "Set load"}</b></div>;
-              })}
-            </div>
-
-            <div className="session-evidence">
-              <span><small>Sets logged</small><strong>{sessionComplete ? lastWorkout!.completedSets : doneSets.length}</strong></span>
-              <span><small>Volume</small><strong>{sessionComplete ? lastWorkout!.volume.toLocaleString() : volume.toLocaleString()} kg</strong></span>
-              <span><small>Meals</small><strong>{meals.length}</strong></span>
-            </div>
-
-            <button className="primary-action" onClick={sessionComplete ? onProgress : onStart}>{sessionAction} <span>â†’</span></button>
-          </article>
-        </section>
-
-        <aside className="context-rail">
-          <section className="today-records">
-            <header><p className="eyebrow">Logged today</p><span>Account data</span></header>
-            <dl>
-              <div><dt>Working sets</dt><dd>{doneSets.length} / {allSets.length}</dd></div>
-              <div><dt>Meals</dt><dd>{meals.length}</dd></div>
-              <div><dt>Energy</dt><dd>{calories.toLocaleString()} kcal</dd></div>
-              <div><dt>Protein</dt><dd>{protein} g</dd></div>
-              <div><dt>Water</dt><dd>{(water / 1000).toFixed(2)} L</dd></div>
-            </dl>
-          </section>
-
-          <button className="coach-command compact" onClick={onCoach}>
-            <span className="coach-mark">âœ¦</span>
-            <p><strong>Review today</strong><small>Use only what you have logged</small></p>
-            <i>â†’</i>
-          </button>
-
-          <section className="today-note">
-            <p className="eyebrow">A useful reminder</p>
-            <strong>Missing data is not failure.</strong>
-            <span>Log what matters, skip what does not, and keep the next action clear.</span>
-          </section>
-        </aside>
-      </div>
-    </div>
-  );
-}
-
-function Train({
-  exercises,
-  setExercises,
-  started,
-  setStarted,
-  startedAt,
-  setStartedAt,
-  onFinish,
-  notify,
-}: {
-  exercises: Exercise[];
-  setExercises: React.Dispatch<React.SetStateAction<Exercise[]>>;
-  started: boolean;
-  setStarted: React.Dispatch<React.SetStateAction<boolean>>;
-  startedAt: number;
-  setStartedAt: React.Dispatch<React.SetStateAction<number>>;
-  onFinish: (summary: WorkoutSummary) => void;
-  notify: (message: string) => void;
-}) {
-  const [view, setView] = useState<TrainView>("Session");
-  const [libraryQuery, setLibraryQuery] = useState("");
-  const [expanded, setExpanded] = useState("incline");
-  const [clock, setClock] = useState(0);
-  const [restEndAt, setRestEndAt] = useStoredState("forge-rest-end-at", 0);
-  const [sessionNote, setSessionNote] = useStoredState("forge-session-note", "");
-  const [noteOpen, setNoteOpen] = useState(Boolean(sessionNote));
-  const allSets = exercises.flatMap((exercise) => exercise.sets);
-  const done = allSets.filter((set) => set.done);
-  const progress = Math.round(done.length / allSets.length * 100);
-  const volume = done.reduce((total, set) => total + set.kg * set.reps, 0);
-  const visibleLibrary = exerciseLibrary.filter((move) => `${move.target} ${move.name} ${move.role}`.toLowerCase().includes(libraryQuery.trim().toLowerCase()));
-
-  useEffect(() => {
-    if (!started || startedAt) return;
-    setStartedAt(Date.now());
-  }, [setStartedAt, started, startedAt]);
-
-  useEffect(() => {
-    if (!started && !restEndAt) return;
-    let id = 0;
-    const tick = () => {
-      const current = Date.now();
-      setClock(current);
-      if (!started && restEndAt <= current) window.clearInterval(id);
-    };
-    const initialTick = window.setTimeout(tick, 0);
-    id = window.setInterval(tick, 1000);
-    return () => {
-      window.clearTimeout(initialTick);
-      window.clearInterval(id);
-    };
-  }, [restEndAt, started]);
-
-  function ensureStarted() {
-    if (started) return;
-    setStarted(true);
-    setStartedAt(Date.now());
-    notify("Session started â€” the clock is live.");
-  }
-
-  function updateSet(exerciseId: string, setIndex: number, field: "kg" | "reps" | "rir", value: number) {
-    const safeValue = Number.isFinite(value) ? Math.max(0, value) : 0;
-    setExercises((current) => current.map((exercise) => exercise.id !== exerciseId ? exercise : { ...exercise, sets: exercise.sets.map((set, index) => index === setIndex ? { ...set, [field]: safeValue } : set) }));
-  }
-
-  function completeSet(exerciseId: string, setIndex: number) {
-    const exercise = exercises.find((item) => item.id === exerciseId);
-    const targetSet = exercise?.sets[setIndex];
-    const markingComplete = Boolean(targetSet && !targetSet.done);
-    if (markingComplete) ensureStarted();
-    setExercises((current) => current.map((exercise) => exercise.id !== exerciseId ? exercise : { ...exercise, sets: exercise.sets.map((set, index) => index === setIndex ? { ...set, done: !set.done } : set) }));
-    if (!markingComplete || !exercise) return;
-    setRestEndAt(Date.now() + 120000);
-    const completedBefore = exercise.sets.filter((set) => set.done).length;
-    if (completedBefore + 1 === exercise.sets.length) {
-      const exerciseIndex = exercises.findIndex((item) => item.id === exerciseId);
-      const nextExercise = exercises[exerciseIndex + 1];
-      if (nextExercise) setExpanded(nextExercise.id);
-    }
-  }
-
-  function beginSession() {
-    if (started) {
-      notify("Session is live. Keep earning the next set.");
-      return;
-    }
-    ensureStarted();
-  }
-
-  function finishSession() {
-    if (!done.length) return;
-    const completed = exercises.flatMap((exercise) => exercise.sets.filter((set) => set.done).map((set) => ({ exercise, set })));
-    const best = completed.reduce((current, item) => {
-      if (!current) return item;
-      const currentScore = current.set.kg * (1 + current.set.reps / 30);
-      const nextScore = item.set.kg * (1 + item.set.reps / 30);
-      return nextScore > currentScore ? item : current;
-    }, completed[0]);
-    const averageRir = completed.reduce((total, item) => total + (item.set.rir ?? 2), 0) / completed.length;
-    const completedAt = clock || startedAt;
-    const summary: WorkoutSummary = {
-      id: crypto.randomUUID(),
-      completedAt,
-      title: "Upper strength",
-      durationSeconds: Math.max(1, elapsedSeconds),
-      completedSets: done.length,
-      totalSets: allSets.length,
-      exerciseCount: exercises.filter((exercise) => exercise.sets.some((set) => set.done)).length,
-      volume,
-      averageRir,
-      bestSet: best.set.kg > 0
-        ? `${best.exercise.name} Â· ${best.set.kg} kg Ã— ${best.set.reps}`
-        : `${best.exercise.name} Â· ${best.set.reps} reps`,
-      note: sessionNote.trim(),
-      sets: completed.map((item, position) => ({
-        id: crypto.randomUUID(),
-        exerciseId: item.exercise.id,
-        exerciseName: item.exercise.name,
-        position,
-        kg: item.set.kg,
-        reps: item.set.reps,
-        rir: item.set.rir ?? 2,
-      })),
-    };
-    setRestEndAt(0);
-    setSessionNote("");
-    onFinish(summary);
-  }
-
-  function selectLibraryMove(move: LibraryMove) {
-    const existing = exercises.find((exercise) => exercise.name === move.name);
-    if (existing) {
-      setExpanded(existing.id);
-      setView("Session");
-      notify(`${move.name} opened in today's session.`);
-      return;
-    }
-    const id = `${move.target}-${move.name}`.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    setExercises((current) => [...current, {
-      id,
-      name: move.name,
-      target: move.target.charAt(0) + move.target.slice(1).toLowerCase(),
-      cue: move.cue,
-      sets: Array.from({ length: 3 }, () => ({ kg: move.startKg, reps: move.reps, rir: 2, done: false })),
-    }]);
-    setExpanded(id);
-    setView("Session");
-    notify(`${move.name} added to today's session.`);
-  }
-
-  const elapsedSeconds = startedAt ? Math.max(0, Math.floor((clock - startedAt) / 1000)) : 0;
-  const restRemaining = Math.max(0, Math.ceil((restEndAt - clock) / 1000));
-  const elapsed = formatClock(elapsedSeconds);
-
-  return (
-    <div className="screen">
-      <ScreenHeading eyebrow="Training" title="Do the next set." copy="Your workout, set log and rest timer in one place." action={<span className="live-pill"><i /> {started ? `Live Â· ${elapsed}` : "Ready to start"}</span>} />
-      <div className="section-tabs" role="tablist" aria-label="Training views">{(["Session", "Week", "Library"] as TrainView[]).map((item) => {
-        const tabId = `train-tab-${item.toLowerCase()}`;
-        const panelId = `train-panel-${item.toLowerCase()}`;
-        return <button id={tabId} role="tab" aria-selected={view === item} aria-controls={panelId} className={view === item ? "active" : ""} onClick={() => setView(item)} key={item}>{item}</button>;
-      })}</div>
-
-      {view === "Session" && <div id="train-panel-session" className="training-layout" role="tabpanel" aria-labelledby="train-tab-session">
-        <section className="training-main">
-          <div className="training-banner">
-            <div><p className="eyebrow hot">{started ? "Workout in progress" : "Starter workout"}</p><h2>Upper strength</h2><span>{started ? `${done.length} of ${allSets.length} sets logged Â· ${volume.toLocaleString()} kg` : `${allSets.length} working sets Â· choose a comfortable load before each movement`}</span></div>
-            <button className="primary-action" onClick={beginSession}>{started ? `Live Â· ${elapsed}` : "Begin session"} <span>â†’</span></button>
-          </div>
-          <div className="exercise-accordion">
-            {exercises.map((exercise, exerciseIndex) => {
-              const open = expanded === exercise.id;
-              const completed = exercise.sets.filter((set) => set.done).length;
-              return <article className={`exercise-block ${open ? "open" : ""}`} key={exercise.id}>
-                <button className="exercise-summary" aria-expanded={open} aria-controls={`exercise-${exercise.id}-sets`} onClick={() => setExpanded(open ? "" : exercise.id)}>
-                  <span className="exercise-number">0{exerciseIndex + 1}</span>
-                  <p><small>{exercise.target}</small><strong>{exercise.name}</strong><span>{exercise.cue}</span></p>
-                  <b>{completed}/{exercise.sets.length}</b><i>âŒ„</i>
-                </button>
-                {open && <div className="set-editor" id={`exercise-${exercise.id}-sets`}>
-                  <div className="set-head"><span>SET</span><span>KG</span><span>REPS</span><span>RIR</span><span>STATUS</span></div>
-                  <p className="field-help" id={`exercise-${exercise.id}-rir-help`}>RIR means the clean reps you could still do. Stop if a movement hurts.</p>
-                  {exercise.sets.map((set, setIndex) => <div className={`set-row ${set.done ? "done" : ""}`} key={setIndex}>
-                    <span>{setIndex + 1}</span>
-                    <SetInput label={`Weight for set ${setIndex + 1}`} unit="kg" value={set.kg} min={0} onChange={(value) => updateSet(exercise.id, setIndex, "kg", value)} />
-                    <SetInput label={`Reps for set ${setIndex + 1}`} unit="reps" value={set.reps} min={1} onChange={(value) => updateSet(exercise.id, setIndex, "reps", value)} />
-                    <label className="rir-input">
-                      <select aria-label={`Reps in reserve for set ${setIndex + 1}`} aria-describedby={`exercise-${exercise.id}-rir-help`} value={set.rir ?? 2} onChange={(event) => updateSet(exercise.id, setIndex, "rir", Number(event.target.value))}>
-                        {[0,1,2,3,4,5].map((value) => <option value={value} key={value}>{value}</option>)}
-                      </select>
-                      <span>RIR</span>
-                    </label>
-                    <button className="set-log-button" onClick={() => completeSet(exercise.id, setIndex)}>{set.done ? "âœ“ Logged" : "Log set"}</button>
-                  </div>)}
-                </div>}
-              </article>;
-            })}
-          </div>
-          {started && done.length === allSets.length && <div className="session-finish-bar">
-            <p><span>Workout complete</span><strong>All {allSets.length} working sets logged</strong></p>
-            <button className="finish-action" onClick={finishSession}>Finish & save <span>â†’</span></button>
-          </div>}
-        </section>
-        <aside className="session-rail">
-          <p className="eyebrow">Workout status</p>
-          <div className="progress-orbit" role="progressbar" aria-label="Workout progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} style={{ "--progress": `${progress * 3.6}deg` } as React.CSSProperties}><span><strong>{progress}%</strong><small>complete</small></span></div>
-          <dl><div><dt>Working sets</dt><dd>{done.length} / {allSets.length}</dd></div><div><dt>Volume</dt><dd>{volume.toLocaleString()} kg</dd></div><div><dt>Elapsed</dt><dd>{elapsed}</dd></div></dl>
-          <div className={`rest-card${restRemaining ? " active" : ""}`}>
-            <span>{restRemaining ? "RESTING" : "REST TIMER"}</span>
-            <strong>{formatClock(restRemaining || 120)}</strong>
-            <div className="rest-actions">
-              {restRemaining
-                ? <><button onClick={() => setRestEndAt(restEndAt + 30000)}>+30 sec</button><button onClick={() => setRestEndAt(0)}>Skip rest</button></>
-                : <button onClick={() => setRestEndAt(Date.now() + 120000)}>Start 2:00</button>}
-            </div>
-          </div>
-          <details className="session-note" open={noteOpen} onToggle={(event) => setNoteOpen(event.currentTarget.open)}>
-            <summary>{sessionNote ? "Edit session note" : "+ Add session note"}</summary>
-            <textarea aria-label="Session note" value={sessionNote} onChange={(event) => setSessionNote(event.target.value)} placeholder="Technique, pain, energy, next adjustmentâ€¦" />
-          </details>
-          <p className="coach-note"><b>âœ¦</b><span>Keep two clean reps in reserve until the final working set.</span></p>
-          {started && done.length > 0 && done.length < allSets.length && <button className="end-session-link" onClick={finishSession}>End session with {done.length} logged sets</button>}
-        </aside>
-      </div>}
-
-      {view === "Week" && <section id="train-panel-week" className="week-board" role="tabpanel" aria-labelledby="train-tab-week">
-        <header><div><p className="eyebrow">Planning preview</p><h2>Example training week</h2><span className="honesty-note">This schedule is illustrative until weekly planning is connected to your account.</span></div><button className="outline-action" onClick={() => setView("Session")}>Open today&apos;s workout</button></header>
-        <div className="week-plan">{weekPlan.map((day) => <article className={day.status} key={day.day}><div><span>{day.day}</span><strong>{day.date}</strong></div><p><small>{day.status === "rest" ? "Recovery" : "Training"}</small><strong>{day.title}</strong><span>{day.focus}</span></p><b>{day.duration}</b></article>)}</div>
-        <p className="program-note"><span>i</span><b>Safety note</b> Pain, swelling or loss of normal movement should change the plan. FORGE does not replace medical care.</p>
-      </section>}
-
-      {view === "Library" && <section id="train-panel-library" className="library-view" role="tabpanel" aria-labelledby="train-tab-library">
-        <header><div><p className="eyebrow">Exercise library</p><h2>Find a movement.</h2></div><label className="library-search"><span>âŒ•</span><input aria-label="Search exercises" value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} placeholder="Search movement or muscleâ€¦" /></label></header>
-        <div className="library-grid">{visibleLibrary.map((move) => {
-          const inPlan = exercises.some((exercise) => exercise.name === move.name);
-          return <article key={move.name}><span>{move.target}</span><h3>{move.name}</h3><p>{move.role}</p><b>{move.cue}</b><button aria-label={`${inPlan ? "Open" : "Add"} ${move.name}`} onClick={() => selectLibraryMove(move)}>{inPlan ? "Open" : "Add"}</button></article>;
-        })}</div>
-        {!visibleLibrary.length && <div className="library-empty"><strong>No movement found.</strong><span>Try a muscle group such as chest, back, or shoulders.</span></div>}
-      </section>}
-    </div>
-  );
-}
-
-function SetInput({ label, unit, value, min, onChange }: { label: string; unit: string; value: number; min: number; onChange: (value: number) => void }) {
-  return (
-    <label className="set-input">
-      <input
-        type="number"
-        inputMode="decimal"
-        aria-label={label}
-        min={min}
-        step="1"
-        value={value}
-        onChange={(event) => onChange(Math.max(min, Number(event.target.value)))}
-      />
-      <span>{unit}</span>
-    </label>
-  );
-}
-
-function Fuel({
-  meals,
-  hydration,
-  water,
-  onAddMeal,
-  onUpdateMeal,
-  onRemoveMeal,
-  onUpdateHydration,
-  onRemoveHydration,
-  onAdjustWater,
-  notify,
-}: {
-  meals: Meal[];
-  hydration: HydrationEntry[];
-  water: number;
-  onAddMeal: (meal: Meal) => void;
-  onUpdateMeal: (meal: Meal) => void;
-  onRemoveMeal: (id: string) => void;
-  onUpdateHydration: (entry: HydrationEntry) => void;
-  onRemoveHydration: (id: string) => void;
-  onAdjustWater: (amountMl: number) => void;
-  notify: (message: string) => void;
-}) {
-  const [mealOpen, setMealOpen] = useState(false);
-  const [editingMeal, setEditingMeal] = useState<Meal | null>(null);
-  const [editingHydration, setEditingHydration] = useState<HydrationEntry | null>(null);
-  const calories = meals.reduce((total, meal) => total + meal.kcal, 0);
-  const protein = meals.reduce((total, meal) => total + meal.protein, 0);
-  const calorieTarget = 2380;
-  const proteinTarget = 190;
-  const calorieProgress = Math.min(100, Math.round(calories / calorieTarget * 100));
-  const waterProgress = Math.min(100, Math.round(water / 3200 * 100));
-  const nextWaterCheckpoint = Math.min(3200, Math.ceil((water + 1) / 250) * 250);
-
-  function addMeal(meal: Omit<Meal, "id" | "recordedAt">) {
-    onAddMeal({ ...meal, id: crypto.randomUUID(), recordedAt: Date.now() });
-    setMealOpen(false);
-    notify(`${meal.name} added to today.`);
-  }
-
-  function saveMeal(meal: Meal) {
-    onUpdateMeal(meal);
-    setEditingMeal(null);
-    notify(`${meal.name} corrected.`);
-  }
-
-  return (
-    <div className="screen">
-      <ScreenHeading eyebrow="Nutrition" title="Fuel" copy="Log what you eat and drink without turning it into another job." action={<button className="fuel-log-action" onClick={() => setMealOpen(true)}><ForgeIcon name="plus"/> Log meal</button>} />
-
-      <section className="fuel-command">
-        <div className="energy-copy">
-          <p className="eyebrow hot">Logged today</p>
-          <div><strong>{calories.toLocaleString()}</strong><span>kcal</span></div>
-          <p><b>{Math.max(0, calorieTarget - calories).toLocaleString()} remaining</b><span>against the current default target</span></p>
-          <i className="fuel-progress" role="progressbar" aria-label="Energy logged" aria-valuemin={0} aria-valuemax={100} aria-valuenow={calorieProgress}><b style={{ width: `${calorieProgress}%` }} /></i>
-        </div>
-        <div className="macro-ledger">
-          {[
-            { name: "Protein", current: protein, target: proteinTarget, unit: "g", tone: "red" },
-            { name: "Energy", current: calories, target: calorieTarget, unit: " kcal", tone: "bronze" },
-            { name: "Water", current: water, target: 3200, unit: " ml", tone: "cream" },
-          ].map((macro) => <div key={macro.name} className={macro.tone}>
-            <span>{macro.name}</span>
-            <strong>{macro.current.toLocaleString()}<small>/{macro.target.toLocaleString()}{macro.unit}</small></strong>
-            <i role="progressbar" aria-label={`${macro.name} logged`} aria-valuemin={0} aria-valuemax={macro.target} aria-valuenow={Math.min(macro.current, macro.target)}><b style={{ width: `${Math.min(100, macro.current / macro.target * 100)}%` }} /></i>
-          </div>)}
-        </div>
-        <p className="target-note">These are current default targets, not a medical prescription. Personal target settings come later.</p>
-      </section>
-
-      <div className="fuel-ledger">
-        <section className="meal-ledger">
-          <header><div><p className="eyebrow">Meals</p><h2>Today&apos;s intake</h2></div><span>{meals.length} logged</span></header>
-          <div className="meal-list">
-            {meals.map((meal, index) => <article key={meal.id}>
-              <span className="meal-index">{String(index + 1).padStart(2, "0")}</span>
-              <time>{meal.time}</time>
-              <p><strong>{meal.name}</strong><span>{meal.detail}</span></p>
-              <dl><div><dt>Protein</dt><dd>{meal.protein}g</dd></div><div><dt>Energy</dt><dd>{meal.kcal} kcal</dd></div></dl>
-              <div className="record-actions">
-                <button aria-label={`Edit ${meal.name}`} onClick={() => setEditingMeal(meal)}>Edit</button>
-                <button aria-label={`Remove ${meal.name}`} onClick={() => {
-                  if (window.confirm(`Remove ${meal.name} from your account?`)) onRemoveMeal(meal.id);
-                }}>Remove</button>
-              </div>
-            </article>)}
-            {!meals.length && <div className="meal-empty"><strong>No meals logged yet.</strong><span>Add the next meal you actually eat.</span></div>}
-          </div>
-        </section>
-
-        <aside className="water-ledger">
-          <header><p className="eyebrow">Water</p><span>{waterProgress}%</span></header>
-          <div className="water-score"><strong>{(water / 1000).toFixed(2)}</strong><span>/ 3.20 L</span></div>
-          <div className="water-gauge" role="progressbar" aria-label="Water logged" aria-valuemin={0} aria-valuemax={3200} aria-valuenow={water}><i style={{ width: `${waterProgress}%` }} /></div>
-          <div className="water-actions"><button aria-label="Remove 250 ml water" onClick={() => onAdjustWater(-250)}>âˆ’</button><button aria-label="Add 250 ml water" onClick={() => onAdjustWater(250)}>Add 250 ml</button></div>
-          <p>{water >= 3200 ? "Daily target" : "Next checkpoint"} <strong>{(nextWaterCheckpoint / 1000).toFixed(2)} L</strong></p>
-          {!!hydration.length && <div className="water-history">
-            <span>Today&apos;s entries</span>
-            {hydration.slice(0, 4).map((entry) => <div key={entry.id}>
-              <time>{new Date(entry.recordedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>
-              <strong>{entry.amountMl > 0 ? "+" : "âˆ’"}{Math.abs(entry.amountMl)} ml</strong>
-              <button onClick={() => setEditingHydration(entry)} aria-label={`Edit ${Math.abs(entry.amountMl)} ml water entry`}>Edit</button>
-            </div>)}
-          </div>}
-        </aside>
-      </div>
-      {mealOpen && <MealDialog onClose={() => setMealOpen(false)} onAdd={addMeal} />}
-      {editingMeal && <MealCorrectionDialog meal={editingMeal} onClose={() => setEditingMeal(null)} onSave={saveMeal} />}
-      {editingHydration && <HydrationCorrectionDialog
-        entry={editingHydration}
-        onClose={() => setEditingHydration(null)}
-        onSave={(entry) => {
-          onUpdateHydration(entry);
-          setEditingHydration(null);
-          notify("Water entry corrected.");
-        }}
-        onRemove={() => {
-          if (window.confirm("Remove this water entry from your account?")) {
-            onRemoveHydration(editingHydration.id);
-            setEditingHydration(null);
-            notify("Water entry removed.");
-          }
-        }}
-      />}
-    </div>
-  );
-}
-function Coach({ exercises, meals }: { exercises: Exercise[]; meals: Meal[] }) {
-  const [input, setInput] = useState("");
-  const [messages, setMessages] = useState([{ role: "coach", text: "I can review the sets and meals you log here. This preview uses simple rules, not a live AI coaching service." }]);
-  const protein = meals.reduce((total, meal) => total + meal.protein, 0);
-  const done = exercises.flatMap((exercise) => exercise.sets).filter((set) => set.done).length;
-  const totalSets = exercises.flatMap((exercise) => exercise.sets).length;
-  const proteinLeft = Math.max(0, 190 - protein);
-  const quick = [
-    { label: "Review today", prompt: "Review what I logged today" },
-    { label: "Plan a simple dinner", prompt: "What is a simple dinner option?" },
-    { label: "Adjust for pain", prompt: "How should I adjust if a movement hurts?" },
-  ];
-
-  function send(text = input) {
-    if (!text.trim()) return;
-    const lower = text.toLowerCase();
-    let answer = `You have logged ${done} of ${totalSets} working sets and ${protein} g of protein today. Finish the next planned set with clean technique before adding more work.`;
-    if (lower.includes("dinner") || lower.includes("Äƒn")) answer = `The current default target leaves about ${proteinLeft} g of protein. Keep dinner simple: a protein source, rice or another carbohydrate, vegetables and water. Adjust portions to your needs.`;
-    if (lower.includes("pain") || lower.includes("hurt") || lower.includes("Ä‘au")) answer = "Stop the painful movement. Reduce load or range only if the movement becomes pain-free. New swelling, weakness or persistent pain needs qualified medical advice.";
-    setMessages((current) => [...current, { role: "user", text }, { role: "coach", text: answer }]);
-    setInput("");
-  }
-
-  const nextMove = done ? `Continue with set ${Math.min(done + 1, totalSets)} of ${totalSets}.` : "Start with the first planned movement.";
-
-  return (
-    <div className="screen coach-screen">
-      <ScreenHeading eyebrow="Coach" title="A second opinion, not another dashboard." copy="Ask about what you have logged today." action={<span className="coach-preview-pill">Guidance preview</span>} />
-
-      <section className="coach-next-move">
-        <div><p className="eyebrow hot">Next useful move</p><h2>{nextMove}</h2><span>Keep the decision small. Technique and pain-free movement come before extra load.</span></div>
-        <button onClick={() => send("Review what I logged today")}>Explain this <b>â†’</b></button>
-      </section>
-
-      <div className="coach-workspace">
-        <section className="coach-chat">
-          <header className="coach-chat-head">
-            <div className="forge-orb"><span>F</span></div>
-            <div><p>FORGE Coach</p><small>Rule-based prototype</small></div>
-          </header>
-          <div className="conversation-feed" role="log" aria-live="polite" aria-label="Coach conversation">
-            {messages.map((message, index) => <div className={`chat-bubble ${message.role}`} key={index}><small>{message.role === "coach" ? "FORGE" : "You"}</small><p>{message.text}</p></div>)}
-          </div>
-          <div className="coach-quick-prompts" aria-label="Suggested coach questions">
-            {quick.map((item) => <button onClick={() => send(item.prompt)} key={item.label}>{item.label}</button>)}
-          </div>
-          <div className="coach-composer">
-            <input aria-label="Ask Forge Coach" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => event.key === "Enter" && send()} placeholder="Ask about todayâ€™s training or foodâ€¦" />
-            <button aria-label="Send message" onClick={() => send()}>â†‘</button>
-          </div>
-        </section>
-
-        <aside className="coach-intel">
-          <header><p>What this preview can see</p><span>Today</span></header>
-          <dl className="coach-facts">
-            <div><dt>Sets logged</dt><dd>{done} / {totalSets}</dd></div>
-            <div><dt>Meals logged</dt><dd>{meals.length}</dd></div>
-            <div><dt>Protein logged</dt><dd>{protein} g</dd></div>
-          </dl>
-          <div className="coach-guardrail">
-            <span>!</span>
-            <div><small>Safety boundary</small><strong>Pain changes the plan</strong><p>FORGE cannot diagnose injury or replace medical care.</p></div>
-          </div>
-          <p className="coach-intel-note">This prototype does not call a production AI model. Its answers are intentionally limited and based only on the records shown here.</p>
-        </aside>
-      </div>
-    </div>
-  );
-}
-
-function Progress({
-  exercises,
-  history,
-  workoutStarted,
-  onTrain,
-  onUpdateWorkout,
-  onDeleteWorkout,
-}: {
-  exercises: Exercise[];
-  history: WorkoutSummary[];
-  workoutStarted: boolean;
-  onTrain: () => void;
-  onUpdateWorkout: (workout: WorkoutSummary) => void;
-  onDeleteWorkout: (id: string) => void;
-}) {
-  const [range, setRange] = useState("12W");
-  const [referenceTime] = useState(Date.now);
-  const [editingWorkout, setEditingWorkout] = useState<WorkoutSummary | null>(null);
-  const rangeDays = range === "4W" ? 28 : range === "6M" ? 183 : 84;
-  const cutoff = referenceTime - rangeDays * 24 * 60 * 60 * 1000;
-  const filteredHistory = history.filter((session) => session.completedAt >= cutoff);
-  const chartSessions = filteredHistory.slice(0, 12).reverse();
-  const currentVolume = exercises.flatMap((exercise) => exercise.sets).filter((set) => set.done).reduce((total, set) => total + set.kg * set.reps, 0);
-  const latest = history[0]!;
-  const totalVolume = filteredHistory.reduce((total, session) => total + session.volume, 0);
-  const averageRir = filteredHistory.length ? filteredHistory.reduce((total, session) => total + session.averageRir, 0) / filteredHistory.length : 0;
-  const maxVolume = Math.max(1, ...chartSessions.map((session) => session.volume));
-  const trendCopy = filteredHistory.length < 3
-    ? `Log ${3 - filteredHistory.length} more ${3 - filteredHistory.length === 1 ? "session" : "sessions"} before changing the plan.`
-    : "Enough data is forming. Compare technique, clean reps left and volume before adding load.";
-
-  if (!history.length) {
-    return (
-      <div className="screen">
-        <ScreenHeading eyebrow="Progress" title="Progress starts with one saved workout." copy="Only completed account records appear here." />
-        <section className="progress-empty">
-          <span>01</span>
-          <div><p className="eyebrow hot">{workoutStarted ? "Workout in progress" : "No completed workouts yet"}</p><h2>{workoutStarted ? "Finish todayâ€™s workout to create your baseline." : "Create the first real data point."}</h2><p>{workoutStarted && currentVolume ? `${currentVolume.toLocaleString()} kg logged so far. Save the workout to add it to your history.` : "Complete and save a workout. Volume, effort and best sets will appear here automatically."}</p></div>
-          <button className="primary-action" onClick={onTrain}>{workoutStarted ? "Resume session" : "Open training"} <b>â†’</b></button>
-        </section>
-      </div>
-    );
-  }
-
-  return (
-    <div className="screen">
-      <ScreenHeading eyebrow="Progress" title="What the work changed." copy="Completed workouts onlyâ€”no placeholder metrics." action={<div className="range-switch" role="group" aria-label="Progress time range">{["4W", "12W", "6M"].map((item) => <button aria-pressed={range === item} className={range === item ? "active" : ""} onClick={() => setRange(item)} key={item}>{item}</button>)}</div>} />
-      <section className="progress-overview">
-        <div><p className="eyebrow">SESSIONS</p><strong>{filteredHistory.length}</strong><span>completed in {range}</span></div>
-        <div><p className="eyebrow">TOTAL VOLUME</p><strong>{(totalVolume / 1000).toFixed(1)}<small> t</small></strong><span>from saved working sets</span></div>
-        <div><p className="eyebrow">AVERAGE EFFORT</p><strong>{averageRir.toFixed(1)}<small> reps left</small></strong><span>clean reps left across saved workouts</span></div>
-      </section>
-      <section className="latest-forge">
-        <div><p className="eyebrow hot">Latest workout</p><h2>{latest.title}</h2><span>{latest.bestSet}</span></div>
-        <dl>
-          <div><dt>Volume</dt><dd>{latest.volume.toLocaleString()} kg</dd></div>
-          <div><dt>Duration</dt><dd>{formatClock(latest.durationSeconds)}</dd></div>
-          <div><dt>Average reps left</dt><dd>{latest.averageRir.toFixed(1)}</dd></div>
-        </dl>
-      </section>
-      <section className="performance-chart">
-        <header><div><p className="eyebrow">Workout volume</p><h2>Saved work, workout by workout.</h2></div><span>{range} Â· {chartSessions.length} logged</span></header>
-        {chartSessions.length ? <div className="bars real-bars">{chartSessions.map((session, index) => <div key={session.id} title={`${session.volume.toLocaleString()} kg`}><i style={{ height: `${Math.max(12, session.volume / maxVolume * 100)}%` }} className={index === chartSessions.length - 1 ? "hot" : ""} /><small>{new Date(session.completedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}</small></div>)}</div> : <p className="range-empty">No completed sessions in this range.</p>}
-      </section>
-      <div className="progress-lower">
-        <section className="recent-sessions">
-          <header><p className="eyebrow">Recent workouts</p><span>{history.length} total</span></header>
-          {workoutStarted && <div><time>Today</time><strong>Upper strength</strong><span>{currentVolume ? `${currentVolume.toLocaleString()} kg` : "In progress"}</span><b>LIVE</b></div>}
-          {history.slice(0, 4).map((session) => <div key={session.id}><time>{new Date(session.completedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}</time><strong>{session.title}</strong><span>{session.volume.toLocaleString()} kg</span><b>{session.completedSets}/{session.totalSets}</b><div className="record-actions"><button aria-label={`Edit ${session.title} workout`} onClick={() => setEditingWorkout(session)}>Edit</button><button aria-label={`Remove ${session.title} workout`} onClick={() => {
-            if (window.confirm("Remove this completed workout from your account?")) onDeleteWorkout(session.id);
-          }}>Remove</button></div></div>)}
-        </section>
-        <section className="progress-insight">
-          <p className="eyebrow">Next review</p>
-          <span>âœ¦</span>
-          <h2>Earn the trend.</h2>
-          <p>{trendCopy}</p>
-          <small>FORGE will not recommend progression from a single good day.</small>
-        </section>
-      </div>
-      {editingWorkout && <WorkoutCorrectionDialog
-        workout={editingWorkout}
-        onClose={() => setEditingWorkout(null)}
-        onSave={(workout) => {
-          onUpdateWorkout(workout);
-          setEditingWorkout(null);
-        }}
-      />}
-    </div>
-  );
-}
-
-function WorkoutCorrectionDialog({ workout, onClose, onSave }: { workout: WorkoutSummary; onClose: () => void; onSave: (workout: WorkoutSummary) => void }) {
-  const dialogRef = useModalA11y<HTMLFormElement>(onClose);
-  const [title, setTitle] = useState(workout.title);
-  const [completedAt, setCompletedAt] = useState(localDateTimeValue(workout.completedAt));
-  const [durationMinutes, setDurationMinutes] = useState(Math.max(1, Math.round(workout.durationSeconds / 60)));
-  const [totalSets, setTotalSets] = useState(workout.totalSets);
-  const [note, setNote] = useState(workout.note);
-  const [sets, setSets] = useState(workout.sets);
-
-  function changeSet(index: number, key: "kg" | "reps" | "rir", value: number) {
-    setSets((current) => current.map((set, setIndex) => setIndex === index ? { ...set, [key]: value } : set));
-  }
-
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const timestamp = new Date(completedAt).getTime();
-    if (!Number.isFinite(timestamp) || !sets.length) return;
-    const normalizedSets = sets.map((set, index) => ({ ...set, position: index }));
-    const volume = normalizedSets.reduce((total, set) => total + set.kg * set.reps, 0);
-    const averageRir = normalizedSets.reduce((total, set) => total + set.rir, 0) / normalizedSets.length;
-    const best = [...normalizedSets].sort((a, b) => b.kg * b.reps - a.kg * a.reps)[0];
-    onSave({
-      ...workout,
-      title: title.trim(),
-      completedAt: timestamp,
-      durationSeconds: Math.round(durationMinutes * 60),
-      completedSets: normalizedSets.length,
-      totalSets: Math.max(normalizedSets.length, Math.round(totalSets)),
-      exerciseCount: new Set(normalizedSets.map((set) => set.exerciseId)).size,
-      volume: Math.round(volume),
-      averageRir,
-      bestSet: `${best.exerciseName} Â· ${best.kg} kg Ã— ${best.reps}`,
-      note: note.trim(),
-      sets: normalizedSets,
-    });
-  }
-
-  return <div className="modal-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <form ref={dialogRef} className="workout-correction" role="dialog" aria-modal="true" aria-labelledby="workout-correction-title" onSubmit={submit}>
-      <header><div><p className="eyebrow hot">Correct record</p><h2 id="workout-correction-title">Edit completed workout</h2></div><button type="button" onClick={onClose} aria-label="Close workout correction">Ã—</button></header>
-      <p className="correction-note">The workout keeps its original identity. Volume, effort and best set are recalculated from the corrected sets.</p>
-      <div className="workout-correction-meta">
-        <label>Workout name<input value={title} maxLength={120} onChange={(event) => setTitle(event.target.value)} required /></label>
-        <label>Date and time<input type="datetime-local" value={completedAt} onChange={(event) => setCompletedAt(event.target.value)} required /></label>
-        <label>Duration (min)<input type="number" min="1" max="2880" value={durationMinutes} onChange={(event) => setDurationMinutes(Math.max(1, Number(event.target.value)))} required /></label>
-        <label>Planned sets<input type="number" min={sets.length || 1} max="1000" value={Math.max(totalSets, sets.length)} onChange={(event) => setTotalSets(Math.max(sets.length, Number(event.target.value)))} required /></label>
-      </div>
-      <div className="workout-correction-sets">
-        <header><span>Completed sets</span><button type="button" onClick={() => {
-          const source = sets[sets.length - 1] ?? workout.sets[0];
-          if (!source || sets.length >= 100) return;
-          setSets((current) => [...current, { ...source, id: crypto.randomUUID(), position: current.length }]);
-        }}>Add set</button></header>
-        {sets.map((set, index) => <div key={set.id}>
-          <span><small>{String(index + 1).padStart(2, "0")}</small><strong>{set.exerciseName}</strong></span>
-          <label>kg<input type="number" min="0" max="1000" step="0.5" value={set.kg} onChange={(event) => changeSet(index, "kg", Math.max(0, Number(event.target.value)))} /></label>
-          <label>reps<input type="number" min="1" max="1000" value={set.reps} onChange={(event) => changeSet(index, "reps", Math.max(1, Number(event.target.value)))} /></label>
-          <label>reps left<input type="number" min="0" max="10" step="0.5" value={set.rir} onChange={(event) => changeSet(index, "rir", Math.max(0, Math.min(10, Number(event.target.value))))} /></label>
-          <button type="button" aria-label={`Remove set ${index + 1}`} disabled={sets.length === 1} onClick={() => setSets((current) => current.filter((_, setIndex) => setIndex !== index))}>Remove</button>
-        </div>)}
-      </div>
-      <label className="workout-note">Workout note <small>optional</small><textarea maxLength={2000} value={note} onChange={(event) => setNote(event.target.value)} /></label>
-      <div className="correction-actions"><button type="button" className="outline-action" onClick={onClose}>Cancel</button><button className="primary-action" type="submit">Save correction <span>â†’</span></button></div>
-    </form>
-  </div>;
-}
-
-function ScreenHeading({ eyebrow, title, copy, action }: { eyebrow: string; title: string; copy: string; action?: React.ReactNode }) {
-  return <header className="screen-heading"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><span>{copy}</span></div>{action}</header>;
-}
-
-function CommandPalette({ onClose, go, startWorkout, addWater }: { onClose: () => void; go: (screen: Screen) => void; startWorkout: () => void; addWater: () => void }) {
-  const dialogRef = useModalA11y<HTMLElement>(onClose);
-
-  return <div className="modal-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <section ref={dialogRef} className="command-palette" role="dialog" aria-modal="true" aria-labelledby="quick-actions-title">
-      <header className="quick-actions-head"><div><p>Quick actions</p><strong id="quick-actions-title">What do you need right now?</strong></div><button onClick={onClose} aria-label="Close quick actions">Ã—</button></header>
-      <p>Choose one action.</p>
-      <button onClick={startWorkout}><i>â…¡</i><span><strong>Start today&apos;s workout</strong><small>Starter plan Â· adjust every set to you</small></span><b>â†’</b></button>
-      <button onClick={addWater}><i>â—’</i><span><strong>Log 250 ml water</strong><small>Add to today&apos;s hydration</small></span><b>+</b></button>
-      <button onClick={() => go("Fuel")}><i>+</i><span><strong>Log a meal</strong><small>Calories, protein and meal details</small></span><b>â†’</b></button>
-      <button onClick={() => go("Coach")}><i>âœ¦</i><span><strong>Ask Forge Coach</strong><small>Training, recovery or nutrition</small></span><b>â†’</b></button>
-    </section>
-  </div>;
-}
-
-function MealDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (meal: Omit<Meal, "id" | "recordedAt">) => void }) {
-  const dialogRef = useModalA11y<HTMLFormElement>(onClose);
-  const presets = [
-    { label: "Breakfast", name: "Eggs & milk", detail: "5 eggs Â· fresh milk", kcal: 640, protein: 46 },
-    { label: "Main meal", name: "Chicken rice", detail: "Rice Â· chicken breast Â· greens", kcal: 720, protein: 58 },
-    { label: "Snack", name: "Yogurt & banana", detail: "Yogurt Â· banana", kcal: 260, protein: 12 },
-  ];
-  const [draft, setDraft] = useState({ time: "19:15", name: "", detail: "", kcal: 0, protein: 0 });
-
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    onAdd(draft);
-  }
-  return <div className="modal-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <form ref={dialogRef} className="meal-dialog" role="dialog" aria-modal="true" aria-labelledby="meal-dialog-title" onSubmit={submit}>
-      <header><div><p className="eyebrow hot">Nutrition log</p><h2 id="meal-dialog-title">Add a meal</h2></div><button type="button" onClick={onClose} aria-label="Close meal form">Ã—</button></header>
-      <div className="meal-presets"><span>Quick fill</span><div>{presets.map((preset) => <button type="button" onClick={() => setDraft((current) => ({ ...current, name: preset.name, detail: preset.detail, kcal: preset.kcal, protein: preset.protein }))} key={preset.label}>{preset.label}</button>)}</div></div>
-      <label>Meal name<input name="name" value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Recovery dinner" required /></label>
-      <label>Food details <small>optional</small><input name="detail" value={draft.detail} onChange={(event) => setDraft((current) => ({ ...current, detail: event.target.value }))} placeholder="Rice Â· chicken Â· greens" /></label>
-      <div><label>Time<input name="time" type="time" value={draft.time} onChange={(event) => setDraft((current) => ({ ...current, time: event.target.value }))} required /></label><label>Calories<input name="kcal" type="number" min="0" value={draft.kcal || ""} onChange={(event) => setDraft((current) => ({ ...current, kcal: Number(event.target.value) }))} required /></label><label>Protein (g)<input name="protein" type="number" min="0" value={draft.protein || ""} onChange={(event) => setDraft((current) => ({ ...current, protein: Number(event.target.value) }))} required /></label></div>
-      <button className="primary-action" type="submit">Add to today <span>â†’</span></button>
-    </form>
-  </div>;
-}
-
-function localDateTimeValue(timestamp: number) {
-  const date = new Date(timestamp);
-  const offset = date.getTimezoneOffset() * 60_000;
-  return new Date(timestamp - offset).toISOString().slice(0, 16);
-}
-
-function MealCorrectionDialog({ meal, onClose, onSave }: { meal: Meal; onClose: () => void; onSave: (meal: Meal) => void }) {
-  const dialogRef = useModalA11y<HTMLFormElement>(onClose);
-  const [draft, setDraft] = useState({
-    recordedAt: localDateTimeValue(meal.recordedAt),
-    time: meal.time,
-    name: meal.name,
-    detail: meal.detail,
-    kcal: meal.kcal,
-    protein: meal.protein,
-  });
-
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const recordedAt = new Date(draft.recordedAt).getTime();
-    if (!Number.isFinite(recordedAt)) return;
-    onSave({ ...meal, ...draft, recordedAt });
-  }
-
-  return <div className="modal-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <form ref={dialogRef} className="meal-dialog correction-dialog" role="dialog" aria-modal="true" aria-labelledby="meal-correction-title" onSubmit={submit}>
-      <header><div><p className="eyebrow hot">Correct record</p><h2 id="meal-correction-title">Edit meal</h2></div><button type="button" onClick={onClose} aria-label="Close meal correction">Ã—</button></header>
-      <p className="correction-note">This updates the same saved record and marks when it was corrected.</p>
-      <label>Meal name<input value={draft.name} maxLength={120} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} required /></label>
-      <label>Food details <small>optional</small><input value={draft.detail} maxLength={300} onChange={(event) => setDraft((current) => ({ ...current, detail: event.target.value }))} /></label>
-      <div><label>Date and time<input type="datetime-local" value={draft.recordedAt} onChange={(event) => {
-        const next = event.target.value;
-        setDraft((current) => ({ ...current, recordedAt: next, time: next.slice(11, 16) }));
-      }} required /></label><label>Calories<input type="number" min="0" max="20000" value={draft.kcal} onChange={(event) => setDraft((current) => ({ ...current, kcal: Number(event.target.value) }))} required /></label><label>Protein (g)<input type="number" min="0" max="2000" value={draft.protein} onChange={(event) => setDraft((current) => ({ ...current, protein: Number(event.target.value) }))} required /></label></div>
-      <div className="correction-actions"><button type="button" className="outline-action" onClick={onClose}>Cancel</button><button className="primary-action" type="submit">Save correction <span>â†’</span></button></div>
-    </form>
-  </div>;
-}
-
-function HydrationCorrectionDialog({ entry, onClose, onSave, onRemove }: { entry: HydrationEntry; onClose: () => void; onSave: (entry: HydrationEntry) => void; onRemove: () => void }) {
-  const dialogRef = useModalA11y<HTMLFormElement>(onClose);
-  const [recordedAt, setRecordedAt] = useState(localDateTimeValue(entry.recordedAt));
-  const [direction, setDirection] = useState<"added" | "removed">(entry.amountMl >= 0 ? "added" : "removed");
-  const [amount, setAmount] = useState(Math.abs(entry.amountMl));
-
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const timestamp = new Date(recordedAt).getTime();
-    if (!Number.isFinite(timestamp) || amount < 1) return;
-    onSave({ ...entry, recordedAt: timestamp, amountMl: direction === "added" ? amount : -amount });
-  }
-
-  return <div className="modal-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <form ref={dialogRef} className="meal-dialog correction-dialog hydration-correction" role="dialog" aria-modal="true" aria-labelledby="hydration-correction-title" onSubmit={submit}>
-      <header><div><p className="eyebrow hot">Correct record</p><h2 id="hydration-correction-title">Edit water entry</h2></div><button type="button" onClick={onClose} aria-label="Close water correction">Ã—</button></header>
-      <p className="correction-note">Use â€œremovedâ€ only when this entry was meant to correct an earlier overcount.</p>
-      <div><label>Change<select value={direction} onChange={(event) => setDirection(event.target.value as "added" | "removed")}><option value="added">Added</option><option value="removed">Removed</option></select></label><label>Amount (ml)<input type="number" min="1" max="3200" value={amount} onChange={(event) => setAmount(Math.max(1, Number(event.target.value)))} required /></label><label>Date and time<input type="datetime-local" value={recordedAt} onChange={(event) => setRecordedAt(event.target.value)} required /></label></div>
-      <div className="correction-actions"><button type="button" className="record-remove-action" onClick={onRemove}>Remove entry</button><button className="primary-action" type="submit">Save correction <span>â†’</span></button></div>
-    </form>
-  </div>;
-}
-
-function ProfileDrawer({
-  profile,
-  email,
-  onClose,
-  onSave,
-  onReplayLogin,
-  onReplayOnboarding,
-}: {
-  profile: ForgeProfile;
-  email: string;
-  onClose: () => void;
-  onSave: (profile: ForgeProfile) => void;
-  onReplayLogin: () => void;
-  onReplayOnboarding: () => void;
-}) {
-  const [draft, setDraft] = useState(profile);
-  const displayName = draft.displayName.trim() || "Athlete";
-  const drawerRef = useModalA11y<HTMLElement>(onClose);
-
-  return <div className="drawer-layer" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <aside ref={drawerRef} className="profile-drawer" role="dialog" aria-modal="true" aria-labelledby="profile-drawer-title">
-      <header><div><span aria-hidden="true">{displayName.slice(0, 1).toUpperCase()}</span><p><strong id="profile-drawer-title">{displayName}</strong><small>{email || "Signed-in athlete"}</small></p></div><button onClick={onClose} aria-label="Close profile">Ã—</button></header>
-      <section className="account-profile"><p className="eyebrow">Athlete profile</p><label>Display name<input value={draft.displayName} maxLength={80} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="How FORGE should address you" /></label><dl><div><dt>Account</dt><dd>Protected</dd></div><div><dt>Plan</dt><dd>Free</dd></div><div><dt>Data</dt><dd>Account synced</dd></div></dl></section>
-      <section><p className="eyebrow">Safety preferences</p><ul><li>Stop or adjust movements that cause pain.</li><li>Progress only with clean range of motion and control.</li><li>Review persistent symptoms with a qualified professional.</li></ul></section>
-      <section><p className="eyebrow">Preferences</p><div className="preference"><span>Units</span><div role="group" aria-label="Measurement units">{(["Metric", "Imperial"] as const).map((item) => <button aria-pressed={draft.units === item} className={draft.units === item ? "active" : ""} onClick={() => setDraft((current) => ({ ...current, units: item }))} key={item}>{item}</button>)}</div></div><div className="preference"><span>Session reminders</span><button aria-label="Session reminders" aria-pressed={draft.notifications} className={`toggle ${draft.notifications ? "on" : ""}`} onClick={() => setDraft((current) => ({ ...current, notifications: !current.notifications }))}><i /></button></div></section>
-      <section className="demo-tools">
-        <p className="eyebrow">Account</p>
-        <a href="/api/records?format=export" download><span><b>Export my records</b><small>Download workouts, meals and hydration as JSON</small></span><i>â†“</i></a>
-        <button onClick={onReplayLogin}><span><b>Replay welcome</b><small>Replay the short cinematic</small></span><i>â†—</i></button>
-        <button onClick={onReplayOnboarding}><span><b>Review setup</b><small>Review the three setup choices</small></span><i>â†’</i></button>
-        <a href="/signout-with-chatgpt?return_to=%2F"><span><b>SIGN OUT</b><small>Securely end this session</small></span><i>â†’</i></a>
-      </section>
-      <button className="outline-action drawer-save" disabled={!draft.displayName.trim()} onClick={() => onSave({ ...draft, displayName: draft.displayName.trim() })}>Save preferences</button>
-    </aside>
-  </div>;
-}
+YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éíßŽøí:-jZ.¶›­–)Þ³R'W6R6Æ–VçB#° ¦–×÷'B²f÷&ÔWfVçBÂÖVÖòÂW6T6ÆÆ&6²ÂW6TVffV7BÂW6U&VbÂW6U7FFRÒg&öÒ'&V7B#°¦–×÷'B°¢Ç•VæF–æt×WFF–öç2À¢&VEVæF–æt×WFF–öç2À¢w&—FUVæF–æt×WFF–öç2À§Òg&öÒ"â÷&V6÷&BÖ×WFF–öâ×VWVRæÖ§2#° §G—R67&VVâÒ%FöF’"Â%G&–â"Â$gVVÂ"Â$6ö6‚"Â%&öw&W72#°§G—RG&–åf–WrÒ%6W76–öâ"Â%vVV²"Â$Æ–'&'’#°§G—RVçG'•7FvRÒ&ÆæF–ær"Â&Æöv–â"Â&öæ&ö&F–ær"Â&#°§G—RÆVæ6„ÖöFRÒ'&WGW&â"Â&æWr#°¦W‡÷'BG—Rf÷&vTWF†VçF–6FVEW6W"Ò²F—7Æ”æÖS¢7G&–æs²VÖ–Ã¢7G&–ærÓ°§G—Rf÷&vU&öf–ÆRÒ²F—7Æ”æÖS¢7G&–æs²Væ—G3¢$ÖWG&–2"Â$–×W&–Â#²æ÷F–f–6F–öç3¢&ööÆVâÓ°§G—R6WDÆörÒ²¶s¢çVÖ&W#²&W3¢çVÖ&W#²&—#ó¢çVÖ&W#²FöæS¢&ööÆVâÓ°§G—RW†W&6—6RÒ²–C¢7G&–æs²æÖS¢7G&–æs²F&vWC¢7G&–æs²7VS¢7G&–æs²6WG3¢6WDÆöuµÒÓ°§G—RÖVÂÒ²–C¢7G&–æs²&V6÷&FVDC¢çVÖ&W#²F–ÖS¢7G&–æs²æÖS¢7G&–æs²FWF–Ã¢7G&–æs²¶6Ã¢çVÖ&W#²&÷FV–ã¢çVÖ&W#²6÷'&V7FVDCó¢7G&–ærÂçVÆÂÓ°§G—Rv÷&¶÷WE6WE&V6÷&BÒ²–C¢7G&–æs²W†W&6—6T–C¢7G&–æs²W†W&6—6TæÖS¢7G&–æs²÷6—F–öã¢çVÖ&W#²¶s¢çVÖ&W#²&W3¢çVÖ&W#²&—#¢çVÖ&W"Ó°§G—Rv÷&¶÷WE7VÖÖ'’Ò°¢–C¢7G&–æs°¢6ö×ÆWFVDC¢çVÖ&W#°¢F—FÆS¢7G&–æs°¢GW&F–öå6V6öæG3¢çVÖ&W#°¢6ö×ÆWFVE6WG3¢çVÖ&W#°¢F÷FÅ6WG3¢çVÖ&W#°¢W†W&6—6T6÷VçC¢çVÖ&W#°¢föÇVÖS¢çVÖ&W#°¢fW&vU&—#¢çVÖ&W#°¢&W7E6WC¢7G&–æs°¢æ÷FS¢7G&–æs°¢6WG3¢v÷&¶÷WE6WE&V6÷&EµÓ°¢6÷'&V7FVDCó¢7G&–ærÂçVÆÃ°§Ó°§G—R‡–G&F–öäVçG'’Ò²–C¢7G&–æs²&V6÷&FVDC¢çVÖ&W#²Ö÷VçDÖÃ¢çVÖ&W#²6÷'&V7FVDCó¢7G&–ærÂçVÆÂÓ°§G—R&V6÷&D¶–æBÒ'v÷&¶÷WB"Â&ÖVÂ"Â&‡–G&F–öâ#°§G—R&V6÷&EfÇVRÒv÷&¶÷WE7VÖÖ'’ÂÖVÂÂ‡–G&F–öäVçG'“°§G—RVæF–æu&V6÷&D×WFF–öâÒ°¢¶W“¢7G&–æs°¢ÖWF†öC¢%õ5B"Â%D4‚"Â$DTÄUDR#°¢G—S¢&V6÷&D¶–æC°¢–C¢7G&–æs°¢&V6÷&Có¢&V6÷&EfÇVS°¢7&VFVDC¢çVÖ&W#°§Ó°§G—R66÷VçD—77VRÒ'6W76–öâ"Â&66W72"Â'Væf–Æ&ÆR"ÂçVÆÃ°§G—RÆ–'&'”Ö÷fRÒ°¢F&vWC¢7G&–æs°¢æÖS¢7G&–æs°¢&öÆS¢7G&–æs°¢7VS¢7G&–æs°¢7F'D¶s¢çVÖ&W#°¢&W3¢çVÖ&W#°§Ó°§G—R–6öäæÖRÒ&†öÖR"Â'G&–â"Â&gVVÂ"Â&6ö6‚"Â'&öw&W72"Â'6V&6‚"Â'ÇW2#° ¦6öç7Bæc¢²æÖS¢67&VVã²–6öã¢–6öäæÖRÕµÒÒ°¢²æÖS¢%FöF’"Â–6öã¢&†öÖR"ÒÀ¢²æÖS¢%G&–â"Â–6öã¢'G&–â"ÒÀ¢²æÖS¢$gVVÂ"Â–6öã¢&gVVÂ"ÒÀ¢²æÖS¢$6ö6‚"Â–6öã¢&6ö6‚"ÒÀ¢²æÖS¢%&öw&W72"Â–6öã¢'&öw&W72"ÒÀ¥Ó° ¦gVæ7F–öâf÷&vT–6öâ‡²æÖRÓ¢²æÖS¢–6öäæÖRÒ’°¢6öç7BF‡3¢&V6÷&CÄ–6öäæÖRÂ&V7Bå&V7DæöFSâÒ°¢†öÖS¢ÃãÇF‚CÒ$Ó2ãRãR"6Ã‚ãRrãR"óãÇF‚CÒ$ÓRãR’ãUc#ƒ5c’ãR"óãÇF‚CÒ$Ó’ãR#bÓfƒWcb"óãÂóâÀ¢G&–ã¢ÃãÇF‚CÒ$ÓbwcÓ‚wcÓ2’ãWcTÓ#’ãWcTÓb&ƒ""óãÂóâÀ¢gVVÃ¢ÃãÇF‚CÒ$Ó"632ãrBRãRrã"RãRRãRRãRÓ3Ó"ã‚ã‚ÓbRãRÓ¢"óãÇF‚CÒ$Ó’ãRRãV2ãbã"ãBã‚"ãRã‚"óãÂóâÀ¢6ö6ƒ¢ÃãÇF‚CÒ&Ó"2ãBRãÃ‚ãR’ãVÂÓRããDÃ"fÂÓãBÓRãÓRãÓãBRãÓãDÃ"5¢"óãÇF‚CÒ&Ó‚ãRRãr"ã2"ã2ãrÓ"ã2ãrÒãr"ã2ÒãrÓ"ã2Ó"ã2Òãr"ã2ÒãrãrÓ"ã5¢"óãÂóâÀ¢&öw&W73¢ÃãÇF‚CÒ$ÓB•cR"óãÇF‚CÒ$ÓB–ƒb"óãÇF‚CÒ&ÓrRBÓR2"RÓb"óãÂóâÀ¢6V&6ƒ¢ÃãÆ6—&6ÆR7ƒÒ#ãR"7“Ò#ãR"#Ò#bãR"óãÇF‚CÒ&ÓRãRRãRRR"óãÂóâÀ¢ÇW3¢ÃãÇF‚CÒ$Ó"WcDÓR&ƒB"óãÂóâÀ¢Ó°¢&WGW&âÇ7fr6Æ74æÖSÒ&f÷&vRÖ–6öâ"f–Wt&÷ƒÒ##B#B"f–ÆÃÒ&æöæR"7G&ö¶SÒ&7W'&VçD6öÆ÷""7G&ö¶Uv–GFƒÒ#ã‚"7G&ö¶TÆ–æV6Ò'&÷VæB"7G&ö¶TÆ–æV¦ö–ãÒ'&÷VæB"&–Ö†–FFVãÒ'G'VR#ç·F‡5¶æÖU×ÓÂ÷7fsã°§Ð ¦gVæ7F–öâW6TÖöFÄ“ÅBW‡FVæG2…DÔÄVÆVÖVçCâ†öä6Æ÷6S¢‚’Óâfö–B’°¢6öç7B6öçF–æW%&VbÒW6U&VcÅCâ†çVÆÂ“° ¢W6TVffV7B‚‚’Óâ°¢6öç7B6öçF–æW"Ò6öçF–æW%&Vbæ7W'&VçC°¢6öç7B&Wf–÷W6Ç”fö7W6VBÒFö7VÖVçBæ7F—fTVÆVÖVçB–ç7Fæ6Vöb…DÔÄVÆVÖVçBòFö7VÖVçBæ7F—fTVÆVÖVçB¢çVÆÃ°¢6öç7B&Wf–÷W4÷fW&fÆ÷rÒFö7VÖVçBæ&öG’ç7G–ÆRæ÷fW&fÆ÷s°¢Fö7VÖVçBæ&öG’ç7G–ÆRæ÷fW&fÆ÷rÒ&†–FFVâ#° ¢6öç7Bfö7W6&ÆRÒ‚’Óâ'&’æg&öÒ†6öçF–æW#òçVW'•6VÆV7F÷$ÆÃÄ…DÔÄVÆVÖVçCâ€¢v'WGFöã¦æ÷B…¶F—6&ÆVEÒ’Æ¶‡&VeÒÆ–çWC¦æ÷B…¶F—6&ÆVEÒ’Ç6VÆV7C¦æ÷B…¶F—6&ÆVEÒ’ÇFW‡F&V¦æ÷B…¶F—6&ÆVEÒ’Å·F&–æFW…Ó¦æ÷B…·F&–æFWƒÒ"Ó%Ò’rÀ¢’óòµÒ’æf–ÇFW"‚†VÆVÖVçB’ÓâVÆVÖVçBæ†4GG&–'WFR‚&†–FFVâ"’“° ¢fö7W6&ÆR‚•³Óòæfö7W2‚“° ¢gVæ7F–öâ†æFÆT¶W’†WfVçC¢¶W–&ö&DWfVçB’°¢–b†WfVçBæ¶W’ÓÓÒ$W66R"’°¢WfVçBç&WfVçDFVfVÇB‚“°¢öä6Æ÷6R‚“°¢&WGW&ã°¢Ð¢–b†WfVçBæ¶W’ÓÒ%F""’&WGW&ã°¢6öç7B—FV×2Òfö7W6&ÆR‚“°¢–b‚—FV×2æÆVæwF‚’&WGW&ã°¢6öç7Bf—'7BÒ—FV×5³Ó°¢6öç7BÆ7BÒ—FV×5¶—FV×2æÆVæwF‚ÒÓ°¢–b†WfVçBç6†–gD¶W’bbFö7VÖVçBæ7F—fTVÆVÖVçBÓÓÒf—'7B’°¢WfVçBç&WfVçDFVfVÇB‚“°¢Æ7Bæfö7W2‚“°¢ÒVÇ6R–b‚WfVçBç6†–gD¶W’bbFö7VÖVçBæ7F—fTVÆVÖVçBÓÓÒÆ7B’°¢WfVçBç&WfVçDFVfVÇB‚“°¢f—'7Bæfö7W2‚“°¢Ð¢Ð ¢Fö7VÖVçBæFDWfVçDÆ—7FVæW"‚&¶W–F÷vâ"Â†æFÆT¶W’“°¢&WGW&â‚’Óâ°¢Fö7VÖVçBç&VÖ÷fTWfVçDÆ—7FVæW"‚&¶W–F÷vâ"Â†æFÆT¶W’“°¢Fö7VÖVçBæ&öG’ç7G–ÆRæ÷fW&fÆ÷rÒ&Wf–÷W4÷fW&fÆ÷s°¢&Wf–÷W6Ç”fö7W6VCòæfö7W2‚“°¢Ó°¢ÒÂ¶öä6Æ÷6UÒ“° ¢&WGW&â6öçF–æW%&Vc°§Ð ¦6öç7Bf÷&vU7&·2Ò'&’æg&öÒ‡²ÆVæwFƒ¢#ÒÂ…òÂ–æFW‚’Óâ‡°¢ƒ¢‚²‚†–æFW‚¢#’’R“’À¢÷&–v–ã¢"²‚†–æFW‚¢2’R3B’À¢G&–gC¢Ó3c²‚†–æFW‚¢“r’Rs#’À¢G&fVÃ¢ƒ²‚†–æFW‚¢cr’RSc’À¢6—¦S¢"²†–æFW‚RB’À¢FVÆ“¢Ò‚†–æFW‚¢ã2’R2ãB’À¢GW&F–öã¢ãSR²‚†–æFW‚¢ãs’RãsR’À§Ò’“° ¦6öç7Bf÷&vTÖ&–Væ6RÒÖVÖò†gVæ7F–öâf÷&vTÖ&–Væ6R‡²FVç6—G’Ò#Ó¢²FVç6—G“ó¢çVÖ&W"Ò’°¢&WGW&â€¢ÆF—b6Æ74æÖSÒ&f÷&vRÖÖ&–Væ6R"&–Ö†–FFVãÒ'G'VR#à¢ÆF—b6Æ74æÖSÒ&f÷&vRÖ†¦R"óà¢ÆF—b6Æ74æÖSÒ&†ÖÖW"ÖfÆ6‚"óà¢ÆF—b6Æ74æÖSÒ&†ÖÖW"ÖfÆ6‚†ÖÖW"ÖfÆ6‚ÖV6†ò"óà¢ÆF—b6Æ74æÖSÒ'7&²Öf–VÆB#à¢¶f÷&vU7&·2ç6Æ–6RƒÂFVç6—G’’æÖ‚‡7&²Â–æFW‚’ÓâÆ’¶W“×¶–æFW‡Ò7G–ÆS×·°¢"Ò×7&²×‚#¢G·7&²ç‡ÒVÀ¢"Ò×7&²Ö÷&–v–â#¢G·7&²æ÷&–v–çÒVÀ¢"Ò×7&²ÖG&–gB#¢G·7&²æG&–gG×†À¢"Ò×7&²×&—6R#¢ÒG·7&²çG&fVÇ×†À¢"Ò×7&²×6—¦R#¢G·7&²ç6—¦W×†À¢"Ò×7&²ÖFVÆ’#¢G·7&²æFVÆ—×6À¢"Ò×7&²ÖGW&F–öâ#¢G·7&²æGW&F–öç×6À¢Ò2&V7Bä555&÷W'F–W7Òóâ—Ð¢ÂöF—cà¢ÂöF—cà¢“°§Ò“° ¦gVæ7F–öâ6–æVÖF–4–çG&ò‡²ÖöFRÂF†ÆWFTæÖRÂöå6¶—Ó¢²ÖöFS¢ÆVæ6„ÖöFS²F†ÆWFTæÖS¢7G&–æs²öå6¶—¢‚’Óâfö–BÒ’°¢W6TVffV7B‚‚’Óâ°¢6öç7B†æFÆTW66RÒ†WfVçC¢¶W–&ö&DWfVçB’Óâ°¢–b†WfVçBæ¶W’ÓÓÒ$W66R"’öå6¶—‚“°¢Ó°¢Fö7VÖVçBæFDWfVçDÆ—7FVæW"‚&¶W–F÷vâ"Â†æFÆTW66R“°¢&WGW&â‚’ÓâFö7VÖVçBç&VÖ÷fTWfVçDÆ—7FVæW"‚&¶W–F÷vâ"Â†æFÆTW66R“°¢ÒÂ¶öå6¶—Ò“° ¢&WGW&â€¢ÆF—`¢6Æ74æÖS×¶6–æVÖF–2ÖvFR6–æVÖF–2ÒG¶ÖöFWÖÐ¢7G–ÆS×·²"ÒÖ6–æVÖF–2ÖGW&F–öâ#¢ÖöFRÓÓÒ'&WGW&â"ò#ãW2"¢#"ãW2"Ò2&V7Bä555&÷W'F–W7Ð¢&–ÖÆ—fSÒ'öÆ—FR ¢&–ÖÆ&VÆÆVF'“Ò&6–æVÖF–2×F—FÆR ¢&–ÖFW67&–&VF'“Ò&6–æVÖF–2ÖÖW76vR ¢&öÆSÒ&F–Æör ¢&–ÖÖöFÃÒ'G'VR ¢à¢Äf÷&vTÖ&–Væ6RFVç6—G“×¶ÖöFRÓÓÒ'&WGW&â"òb¢#GÒóà¢ÆF—b6Æ74æÖSÒ&6–æVÖF–2×f–væWGFR"&–Ö†–FFVãÒ'G'VR"óà¢ÆF—b6Æ74æÖSÒ&6–æVÖF–2×7G&–¶R"&–Ö†–FFVãÒ'G'VR"óà¢ÆF—b6Æ74æÖSÒ&6–æVÖF–2ÖÖ&²#à¢Ç7ãç¶ÖöFRÓÓÒ'&WGW&â"òtTÄ4ôÔR$4²ÂG¶F†ÆWFTæÖRçFõWW$66R‚—Ö¢%”õU"Äâ•2$TE’'ÓÂ÷7ãà¢Æƒ–CÒ&6–æVÖF–2×F—FÆR#ädõ$tSÂöƒà¢ÆF—b6Æ74æÖSÒ&6–æVÖF–2×'VÆR#ãÆ’óãÂöF—cà¢Ç–CÒ&6–æVÖF–2ÖÖW76vR#ç¶ÖöFRÓÓÒ'&WGW&â"ò$ÄUN(	•2tõ$²â"¢%D„Rtõ$²•2”õU%2â'ÓÂ÷à¢ÂöF—cà¢Æ'WGFöâ6Æ74æÖSÒ&6–æVÖF–2×6¶—"öä6Æ–6³×¶öå6¶—ÒWFôfö7W3å6¶—–çG&óÂö'WGFöãà¢ÂöF—cà¢“°§Ð ¦gVæ7F–öâf÷&ÖD6Æö6²‡F÷FÅ6V6öæG3¢çVÖ&W"’°¢6öç7B6fU6V6öæG2ÒÖF‚æÖ‚ƒÂÖF‚æfÆö÷"‡F÷FÅ6V6öæG2’“°¢6öç7BÖ–çWFW2ÒÖF‚æfÆö÷"‡6fU6V6öæG2òc“°¢6öç7B6V6öæG2Ò6fU6V6öæG2Rc°¢&WGW&âGµ7G&–ær†Ö–çWFW2’çE7F'Bƒ"Â#"—Ó¢Gµ7G&–ær‡6V6öæG2’çE7F'Bƒ"Â#"—Ö°§Ð ¦gVæ7F–öâ—56ÖTÆö6ÄF’‡F–ÖW7F×¢çVÖ&W"Âæ÷rÒFFRææ÷r‚’’°¢6öç7B&V6÷&DFFRÒæWrFFR‡F–ÖW7F×“°¢6öç7B7W'&VçDFFRÒæWrFFR†æ÷r“°¢&WGW&â&V6÷&DFFRævWDgVÆÅ–V"‚’ÓÓÒ7W'&VçDFFRævWDgVÆÅ–V"‚¢bb&V6÷&DFFRævWDÖöçF‚‚’ÓÓÒ7W'&VçDFFRævWDÖöçF‚‚¢bb&V6÷&DFFRævWDFFR‚’ÓÓÒ7W'&VçDFFRævWDFFR‚“°§Ð ¦gVæ7F–öâ66÷VçD—77VTf÷%7FGW2‡7FGW3¢çVÖ&W"“¢W†6ÇVFSÄ66÷VçD—77VRÂçVÆÃâ°¢–b‡7FGW2ÓÓÒC’&WGW&â'6W76–öâ#°¢–b‡7FGW2ÓÓÒC2’&WGW&â&66W72#°¢&WGW&â'Væf–Æ&ÆR#°§Ð ¦gVæ7F–öâ66÷VçD—77VTg&öÔW'&÷"†W'&÷#¢Væ¶æ÷vâ“¢W†6ÇVFSÄ66÷VçD—77VRÂçVÆÃâ°¢–b†W'&÷"–ç7Fæ6VöbW'&÷"bb²'6W76–öâ"Â&66W72"Â'Væf–Æ&ÆR%Òæ–æ6ÇVFW2†W'&÷"æÖW76vR’’°¢&WGW&âW'&÷"æÖW76vR2W†6ÇVFSÄ66÷VçD—77VRÂçVÆÃã°¢Ð¢&WGW&â'Væf–Æ&ÆR#°§Ð ¦gVæ7F–öâFöÖ–æçD66÷VçD—77VR†—77VW3¢66÷VçD—77VUµÒ“¢66÷VçD—77VR°¢–b†—77VW2æ–æ6ÇVFW2‚'6W76–öâ"’’&WGW&â'6W76–öâ#°¢–b†—77VW2æ–æ6ÇVFW2‚&66W72"’’&WGW&â&66W72#°¢–b†—77VW2æ–æ6ÇVFW2‚'Væf–Æ&ÆR"’’&WGW&â'Væf–Æ&ÆR#°¢&WGW&âçVÆÃ°§Ð ¦gVæ7F–öâv÷&¶÷WD6ö×ÆWFR‡²7VÖÖ'’ÂöåFöF’Âöå&öw&W72Ó¢²7VÖÖ'“¢v÷&¶÷WE7VÖÖ'“²öåFöF“¢‚’Óâfö–C²öå&öw&W73¢‚’Óâfö–BÒ’°¢6öç7BF–Æöu&VbÒW6TÖöFÄ“Ä…DÔÄF—dVÆVÖVçCâ†öåFöF’“° ¢&WGW&â€¢ÆF—b&Vc×¶F–Æöu&VgÒ6Æ74æÖSÒ'v÷&¶÷WBÖ6ö×ÆWFR"&öÆSÒ&F–Æör"&–ÖÖöFÃÒ'G'VR"&–ÖÆ&VÆÆVF'“Ò'v÷&¶÷WBÖ6ö×ÆWFR×F—FÆR#à¢Äf÷&vTÖ&–Væ6RFVç6—G“×³#‡Òóà¢ÆF—b6Æ74æÖSÒ&6ö×ÆWF–öâ×7G&–¶R"&–Ö†–FFVãÒ'G'VR"óà¢Ç6V7F–öãà¢Ç6Æ74æÖSÒ&W–V'&÷r†÷B#å4U54”ôâdõ$tTCÂ÷à¢Ç7â6Æ74æÖSÒ&6ö×ÆWF–öâÖÖ&²#î)ÊcÂ÷7ãà¢Æƒ"–CÒ'v÷&¶÷WBÖ6ö×ÆWFR×F—FÆR#åF†Rv÷&²—2FöæRãÆ'"óãÆVÓåF†R7FæF&B&VÖ–ç2ãÂöVÓãÂöƒ#à¢Ç6Æ74æÖSÒ&6ö×ÆWF–öâÖ6÷’#åWW"7G&VæwF‚—26fVBFò–÷W"66÷VçBâ&V6÷fW"Â&VgVVÂÂæB&WGW&âv†Vâ–÷R&R&VG’ãÂ÷à¢ÆF—b6Æ74æÖSÒ&6ö×ÆWF–öâ×7FG2#à¢ÆF—cãÇ6ÖÆÃådôÅTÔSÂ÷6ÖÆÃãÇ7G&öæsç·7VÖÖ'’çföÇVÖRçFôÆö6ÆU7G&–ær‚—ÓÆVÓâ¶sÂöVÓãÂ÷7G&öæsãÂöF—cà¢ÆF—cãÇ6ÖÆÃåtõ$´”är4UE3Â÷6ÖÆÃãÇ7G&öæsç·7VÖÖ'’æ6ö×ÆWFVE6WG7ÓÆVÓâò·7VÖÖ'’çF÷FÅ6WG7ÓÂöVÓãÂ÷7G&öæsãÂöF—cà¢ÆF—cãÇ6ÖÆÃäEU$D”ôãÂ÷6ÖÆÃãÇ7G&öæsç¶f÷&ÖD6Æö6²‡7VÖÖ'’æGW&F–öå6V6öæG2—ÓÂ÷7G&öæsãÂöF—cà¢ÆF—cãÇ6ÖÆÃå$U2ÄTeCÂ÷6ÖÆÃãÇ7G&öæsç·7VÖÖ'’æfW&vU&—"çFôf—†VBƒ—ÓÂ÷7G&öæsãÂöF—cà¢ÂöF—cà¢ÆF—b6Æ74æÖSÒ&6ö×ÆWF–öâÖ&W7B#ãÇ7ãä$U5B4UCÂ÷7ããÇ7G&öæsç·7VÖÖ'’æ&W7E6WGÓÂ÷7G&öæsãÂöF—cà¢ÆF—b6Æ74æÖSÒ&6ö×ÆWF–öâÖ7F–öç2#à¢Æ'WGFöâ6Æ74æÖSÒ&÷WFÆ–æRÖ7F–öâ"öä6Æ–6³×¶öåFöF—Óä&6²FòFöF“Âö'WGFöãà¢Æ'WGFöâ6Æ74æÖSÒ&f–æ—6‚Ö7F–öâ"öä6Æ–6³×¶öå&öw&W77Óåf–Wr&öw&W72Ç7ãî(i#Â÷7ããÂö'WGFöãà¢ÂöF—cà¢Ç6ÖÆÂ6Æ74æÖSÒ&6ö×ÆWF–öâ×&÷Fö6öÂ#å4dTBDò”õU"44õTåCÂ÷6ÖÆÃà¢Â÷6V7F–öãà¢ÂöF—cà¢“°§Ð ¦6öç7B–æ—F–ÄW†W&6—6W3¢W†W&6—6UµÒÒ°¢²–C¢&–æ6Æ–æR"ÂæÖS¢$–æ6Æ–æRGVÖ&&VÆÂ&W72"ÂF&vWC¢%WW"6†W7B"Â7VS¢$6†ö÷6R6öÖf÷'F&ÆRÆöB+rW6R–âÖg&VR&ævR"Â6WG3¢·²¶s¢Â&W3¢‚ÂFöæS¢fÇ6RÒÂ²¶s¢Â&W3¢‚ÂFöæS¢fÇ6RÒÂ²¶s¢Â&W3¢‚ÂFöæS¢fÇ6RÕÒÒÀ¢²–C¢'&÷r"ÂæÖS¢$6†W7B×7W÷'FVB&÷r"ÂF&vWC¢$&6²"Â7VS¢$6†ö÷6R6öÖf÷'F&ÆRÆöB+r¶VWF†RÖ÷fVÖVçB6öçG&öÆÆVB"Â6WG3¢·²¶s¢Â&W3¢ÂFöæS¢fÇ6RÒÂ²¶s¢Â&W3¢ÂFöæS¢fÇ6RÒÂ²¶s¢Â&W3¢ÂFöæS¢fÇ6RÕÒÒÀ¢²–C¢'6†÷VÆFW""ÂæÖS¢%6VFVBGVÖ&&VÆÂ&W72"ÂF&vWC¢%6†÷VÆFW'2"Â7VS¢$6†ö÷6R6öÖf÷'F&ÆRÆöB+r7F÷v—F‚"6ÆVâ&W2ÆVgB"Â6WG3¢·²¶s¢Â&W3¢‚ÂFöæS¢fÇ6RÒÂ²¶s¢Â&W3¢‚ÂFöæS¢fÇ6RÒÂ²¶s¢Â&W3¢‚ÂFöæS¢fÇ6RÕÒÒÀ¥Ó° ¦6öç7BvVVµÆâÒ°¢²F“¢$Ôôâ"ÂFFS¢##r"ÂF—FÆS¢%WW"7G&VæwF‚"Âfö7W3¢$6†W7B+r&6²"ÂGW&F–öã¢#ƒÖ–â"Â7FGW3¢'FöF’"ÒÀ¢²F“¢%ETR"ÂFFS¢##‚"ÂF—FÆS¢$&6²v–GF‚"Âfö7W3¢$ÆG2+r&–6W2"ÂGW&F–öã¢#cRÖ–â"Â7FGW3¢&æW‡B"ÒÀ¢²F“¢%tTB"ÂFFS¢##’"ÂF—FÆS¢$6†W7B6öçG&öÂ"Âfö7W3¢$Ö–B+rÆ÷vW""ÂGW&F–öã¢#cÖ–â"Â7FGW3¢&æW‡B"ÒÀ¢²F“¢%D…R"ÂFFS¢#3"ÂF—FÆS¢$&6²F†–6¶æW72"Âfö7W3¢%&÷w2+r&V"FVÇG2"ÂGW&F–öã¢#sÖ–â"Â7FGW3¢&æW‡B"ÒÀ¢²F“¢$e$’"ÂFFS¢#3"ÂF—FÆS¢%6†÷VÆFW'2b&×2"Âfö7W3¢$FVÇG2+r&×2"ÂGW&F–öã¢#cÖ–â"Â7FGW3¢&æW‡B"ÒÀ¢²F“¢%4B"ÂFFS¢#"ÂF—FÆS¢%&V6÷fW'’"Âfö7W3¢%7v–Ò+rÖö&–Æ—G’"ÂGW&F–öã¢#3RÖ–â"Â7FGW3¢'&W7B"ÒÀ¢²F“¢%5Tâ"ÂFFS¢#""ÂF—FÆS¢$gVÆÂ&W7B"Âfö7W3¢%vÆ²+r&W6WB"ÂGW&F–öã¢.(	B"Â7FGW3¢'&W7B"ÒÀ¥Ó° ¦6öç7BW†W&6—6TÆ–'&'“¢Æ–'&'”Ö÷fUµÒÒ°¢²F&vWC¢$4„U5B"ÂæÖS¢$–æ6Æ–æRGVÖ&&VÆÂ&W72"Â&öÆS¢%&–Ö'’+r7G&VæwF‚"Â7VS¢$6†ö÷6R6öÖf÷'F&ÆRÆöB"Â7F'D¶s¢Â&W3¢‚ÒÀ¢²F&vWC¢$$4²"ÂæÖS¢$76—7FVBVÆÂ×W"Â&öÆS¢%&–Ö'’+rv–GF‚"Â7VS¢%W6RVæ÷Vv‚76—7Fæ6Rf÷"6ÆVâ&W2"Â7F'D¶s¢Â&W3¢‚ÒÀ¢²F&vWC¢$$4²"ÂæÖS¢$6†W7B×7W÷'FVB&÷r"Â&öÆS¢%&–Ö'’+rF†–6¶æW72"Â7VS¢%W6Rv—F‚6öçG&öÂ"Â7F'D¶s¢Â&W3¢ÒÀ¢²F&vWC¢%4„õTÄDU%2"ÂæÖS¢%6VFVBGVÖ&&VÆÂ&W72"Â&öÆS¢%&–Ö'’+r7G&VæwF‚"Â7VS¢%7F÷v—F‚"6ÆVâ&W2ÆVgB"Â7F'D¶s¢Â&W3¢‚ÒÀ¢²F&vWC¢$$Õ2"ÂæÖS¢$6&ÆRG&–6W2W‡FVç6–öâ"Â&öÆS¢$66W76÷'’+rG&–6W2"Â7VS¢$Ö÷fRv—F‚6öçG&öÂ"Â7F'D¶s¢Â&W3¢ÒÀ¢²F&vWC¢$ÄTu2"ÂæÖS¢$†—&GV7F–öâ"Â&öÆS¢$66W76÷'’+r†—2"Â7VS¢%W6R–âÖg&VR&ævR"Â7F'D¶s¢Â&W3¢"ÒÀ¥Ó° ¦gVæ7F–öâW6U7F÷&VE7FFSÅCâ†¶W“¢7G&–ærÂfÆÆ&6³¢BÂ66÷VçD&6¶VBÒfÇ6R’°¢6öç7B·fÇVRÂ6WEfÇVUÒÒW6U7FFSÅCâ†fÆÆ&6²“°¢6öç7B·&VG’Â6WE&VG•ÒÒW6U7FFR†fÇ6R“°¢6öç7B¶F—'G’Â6WDF—'G•ÒÒW6U7FFR†fÇ6R“°¢6öç7B¶ÆöDW'&÷"Â6WDÆöDW'&÷%ÒÒW6U7FFSÄ66÷VçD—77VSâ†çVÆÂ“°¢6öç7B·7–æ4W'&÷"Â6WE7–æ4W'&÷%ÒÒW6U7FFSÄ66÷VçD—77VSâ†çVÆÂ“°¢6öç7B·&WG'”æöæ6RÂ6WE&WG'”æöæ6UÒÒW6U7FFRƒ“°¢6öç7BWFFUfÇVS¢G—Vöb6WEfÇVRÒW6T6ÆÆ&6²‚†æW‡B’Óâ°¢6WDF—'G’‡G'VR“°¢6WEfÇVR†æW‡B“°¢ÒÂµÒ“° ¢W6TVffV7B‚‚’Óâ°¢ÆWB6æ6VÆÆVBÒfÇ6S° ¢–b†66÷VçD&6¶VB’°¢fWF6‚†ö’÷7FFSö¶W“ÒG¶Væ6öFUU$”6ö×öæVçB†¶W’—ÖÂ°¢†VFW'3¢²66WC¢&Æ–6F–öâö§6öâ"ÒÀ¢7&VFVçF–Ç3¢'6ÖRÖ÷&–v–â"À¢Ò¢çF†Vâ†7–æ2‡&W7öç6R’Óâ°¢–b‚&W7öç6Ræö²’F‡&÷ræWrW'&÷"†66÷VçD—77VTf÷%7FGW2‡&W7öç6Rç7FGW2’“°¢&WGW&â&W7öç6Ræ§6öâ‚’2&öÖ—6SÇ²fÇVS¢BÂçVÆÂÓã°¢Ò¢çF†Vâ‚‡–ÆöB’Óâ°¢–b‚6æ6VÆÆVB’°¢6WDÆöDW'&÷"†çVÆÂ“°¢–b‡–ÆöBçfÇVRÓÒçVÆÂ’6WEfÇVR‡–ÆöBçfÇVR“°¢Ð¢Ò¢æ6F6‚‚†W'&÷"’Óâ°¢–b‚6æ6VÆÆVB’6WDÆöDW'&÷"†66÷VçD—77VTg&öÔW'&÷"†W'&÷"’“°¢Ò¢æf–æÆÇ’‚‚’Óâ°¢–b‚6æ6VÆÆVB’6WE&VG’‡G'VR“°¢Ò“° ¢&WGW&â‚’Óâ°¢6æ6VÆÆVBÒG'VS°¢Ó°¢Ð ¢6öç7Bg&ÖRÒv–æF÷rç&WVW7Dæ–ÖF–öäg&ÖR‚‚’Óâ°¢G'’°¢6öç7B7F÷&VBÒv–æF÷ræÆö6Å7F÷&vRævWD—FVÒ†¶W’“°¢–b‡7F÷&VB’6WEfÇVR„¥4ôâç'6R‡7F÷&VB’“°¢Ò6F6‚·Ð¢6WE&VG’‡G'VR“°¢Ò“°¢&WGW&â‚’Óâv–æF÷ræ6æ6VÄæ–ÖF–öäg&ÖR†g&ÖR“°¢ÒÂ¶66÷VçD&6¶VBÂ¶W•Ò“° ¢W6TVffV7B‚‚’Óâ°¢–b‚&VG’ÇÂF—'G’ÇÂ†66÷VçD&6¶VBbbÆöDW'&÷"’’&WGW&ã° ¢–b†66÷VçD&6¶VB’°¢6öç7B–BÒv–æF÷rç6WEF–ÖV÷WB‚‚’Óâ°¢fWF6‚†ö’÷7FFSö¶W“ÒG¶Væ6öFUU$”6ö×öæVçB†¶W’—ÖÂ°¢ÖWF†öC¢%UB"À¢7&VFVçF–Ç3¢'6ÖRÖ÷&–v–â"À¢†VFW'3¢²$6öçFVçBÕG—R#¢&Æ–6F–öâö§6öâ"ÒÀ¢&öG“¢¥4ôâç7G&–æv–g’‡²fÇVRÒ’À¢Ò¢çF†Vâ‚‡&W7öç6R’Óâ°¢–b‚&W7öç6Ræö²’F‡&÷ræWrW'&÷"†66÷VçD—77VTf÷%7FGW2‡&W7öç6Rç7FGW2’“°¢6WDF—'G’†fÇ6R“°¢6WE7–æ4W'&÷"†çVÆÂ“°¢Ò¢æ6F6‚‚†W'&÷"’Óâ6WE7–æ4W'&÷"†66÷VçD—77VTg&öÔW'&÷"†W'&÷"’’“°¢ÒÂCS“° ¢&WGW&â‚’Óâv–æF÷ræ6ÆV%F–ÖV÷WB†–B“°¢Ð ¢G'’²v–æF÷ræÆö6Å7F÷&vRç6WD—FVÒ†¶W’Â¥4ôâç7G&–æv–g’‡fÇVR’“²Ò6F6‚·Ð¢ÒÂ¶66÷VçD&6¶VBÂF—'G’Â¶W’ÂÆöDW'&÷"Â&VG’Â&WG'”æöæ6RÂfÇVUÒ“° ¢&WGW&â·fÇVRÂWFFUfÇVRÂ&VG’ÂÆöDW'&÷"Â7–æ4W'&÷"Â‚’Óâ6WE&WG'”æöæ6R‚†7W'&VçB’Óâ7W'&VçB²•Ò26öç7C°§Ð ¦gVæ7F–öâW6TGW&&ÆU&V6÷&G2†66÷VçD&6¶VC¢&ööÆVâ’°¢6öç7B·v÷&¶÷WG2Â6WEv÷&¶÷WG5ÒÒW6U7FFSÅv÷&¶÷WE7VÖÖ'•µÓâ…µÒ“°¢6öç7B¶ÖVÇ2Â6WDÖVÇ5ÒÒW6U7FFSÄÖVÅµÓâ…µÒ“°¢6öç7B¶‡–G&F–öâÂ6WD‡–G&F–öåÒÒW6U7FFSÄ‡–G&F–öäVçG'•µÓâ…µÒ“°¢6öç7B·&VG’Â6WE&VG•ÒÒW6U7FFR‚66÷VçD&6¶VB“°¢6öç7B¶ÆöDW'&÷"Â6WDÆöDW'&÷%ÒÒW6U7FFSÄ66÷VçD—77VSâ†çVÆÂ“°¢6öç7B·7–æ4W'&÷"Â6WE7–æ4W'&÷%ÒÒW6U7FFSÄ66÷VçD—77VSâ†çVÆÂ“°¢6öç7BVæF–ærÒW6U&Vb†æWrÖÇ7G&–ærÂVæF–æu&V6÷&D×WFF–öãâ‚’“°¢6öç7BG&–æ–ærÒW6U&Vb†fÇ6R“° ¢6öç7BW'6—7EVæF–ærÒW6T6ÆÆ&6²‚‚’Óâ°¢–b‡G—Vöbv–æF÷rÓÓÒ'VæFVf–æVB"’&WGW&ã°¢w&—FUVæF–æt×WFF–öç2‡v–æF÷rç6W76–öå7F÷&vRÂ²ââçVæF–æræ7W'&VçBçfÇVW2‚•Ò“°¢ÒÂµÒ“° ¢6öç7BW†V7WFT×WFF–öâÒW6T6ÆÆ&6²†7–æ2†×WFF–öã¢VæF–æu&V6÷&D×WFF–öâ’Óâ°¢6öç7B&W7öç6RÒ×WFF–öâæÖWF†öBÓÓÒ$DTÄUDR ¢òv—BfWF6‚†ö’÷&V6÷&G3÷G—SÒG¶Væ6öFUU$”6ö×öæVçB†×WFF–öâçG—R—Òf–CÒG¶Væ6öFUU$”6ö×öæVçB†×WFF–öâæ–B—ÖÂ°¢ÖWF†öC¢$DTÄUDR"À¢7&VFVçF–Ç3¢'6ÖRÖ÷&–v–â"À¢Ò¢¢v—BfWF6‚‚"ö’÷&V6÷&G2"Â°¢ÖWF†öC¢×WFF–öâæÖWF†öBÀ¢7&VFVçF–Ç3¢'6ÖRÖ÷&–v–â"À¢†VFW'3¢²$6öçFVçBÕG—R#¢&Æ–6F–öâö§6öâ"ÒÀ¢&öG“¢¥4ôâç7G&–æv–g’‡²G—S¢×WFF–öâçG—RÂ&V6÷&C¢×WFF–öâç&V6÷&BÒ’À¢Ò“°¢–b‚&W7öç6Ræö²’F‡&÷ræWrW'&÷"†66÷VçD—77VTf÷%7FGW2‡&W7öç6Rç7FGW2’“°¢ÒÂµÒ“° ¢6öç7BG&–åVæF–ærÒW6T6ÆÆ&6²†7–æ2‚’Óâ°¢–b†G&–æ–æræ7W'&VçB’&WGW&ã°¢G&–æ–æræ7W'&VçBÒG'VS°¢ÆWBf–ÆVBÒfÇ6S°¢G'’°¢v†–ÆR‡VæF–æræ7W'&VçBç6—¦R’°¢6öç7B×WFF–öâÒ²ââçVæF–æræ7W'&VçBçfÇVW2‚•Ð¢ç6÷'B‚†Â"’Óâæ7&VFVDBÒ"æ7&VFVDB•³Ó°¢G'’°¢v—BW†V7WFT×WFF–öâ†×WFF–öâ“°¢VæF–æræ7W'&VçBæFVÆWFR†×WFF–öâæ¶W’“°¢W'6—7EVæF–ær‚“°¢Ò6F6‚†W'&÷"’°¢f–ÆVBÒG'VS°¢6WE7–æ4W'&÷"†66÷VçD—77VTg&öÔW'&÷"†W'&÷"’“°¢&WGW&ã°¢Ð¢Ð¢6WE7–æ4W'&÷"†çVÆÂ“°¢Òf–æÆÇ’°¢G&–æ–æræ7W'&VçBÒfÇ6S°¢–b‚f–ÆVBbbVæF–æræ7W'&VçBç6—¦R’fö–BG&–åVæF–ær‚“°¢Ð¢ÒÂ¶W†V7WFT×WFF–öâÂW'6—7EVæF–æuÒ“° ¢6öç7B'Vä×WFF–öâÒW6T6ÆÆ&6²‚†×WFF–öã¢VæF–æu&V6÷&D×WFF–öâ’Óâ°¢–b‚66÷VçD&6¶VB’&WGW&ã°¢VæF–æræ7W'&VçBç6WB†×WFF–öâæ¶W’Â×WFF–öâ“°¢W'6—7EVæF–ær‚“°¢fö–BG&–åVæF–ær‚“°¢ÒÂ¶66÷VçD&6¶VBÂG&–åVæF–ærÂW'6—7EVæF–æuÒ“° ¢6öç7B&WG'’ÒG&–åVæF–æs° ¢W6TVffV7B‚‚’Óâ°¢–b‚66÷VçD&6¶VB’&WGW&ã°¢ÆWB6æ6VÆÆVBÒfÇ6S°¢6öç7B&W7F÷&VBÒ&VEVæF–æt×WFF–öç2‡v–æF÷rç6W76–öå7F÷&vR’2VæF–æu&V6÷&D×WFF–öåµÓ°¢VæF–æræ7W'&VçBÒæWrÖ‡&W7F÷&VBæÖ‚†×WFF–öâ’Óâ¶×WFF–öâæ¶W’Â×WFF–öåÒ’“°¢w&—FUVæF–æt×WFF–öç2‡v–æF÷rç6W76–öå7F÷&vRÂ&W7F÷&VB“°¢fWF6‚‚"ö’÷&V6÷&G2"Â°¢†VFW'3¢²66WC¢&Æ–6F–öâö§6öâ"ÒÀ¢7&VFVçF–Ç3¢'6ÖRÖ÷&–v–â"À¢Ò¢çF†Vâ†7–æ2‡&W7öç6R’Óâ°¢–b‚&W7öç6Ræö²’F‡&÷ræWrW'&÷"†66÷VçD—77VTf÷%7FGW2‡&W7öç6Rç7FGW2’“°¢&WGW&â&W7öç6Ræ§6öâ‚’2&öÖ—6SÇ²v÷&¶÷WG3¢v÷&¶÷WE7VÖÖ'•µÓ²ÖVÇ3¢ÖVÅµÓ²‡–G&F–öã¢‡–G&F–öäVçG'•µÒÓã°¢Ò¢çF†Vâ‚‡&V6÷&G2’Óâ°¢–b†6æ6VÆÆVB’&WGW&ã°¢6öç7B&V6öæ6–ÆVBÒÇ•VæF–æt×WFF–öç2‡&V6÷&G2Â&W7F÷&VB’2°¢v÷&¶÷WG3¢v÷&¶÷WE7VÖÖ'•µÓ°¢ÖVÇ3¢ÖVÅµÓ°¢‡–G&F–öã¢‡–G&F–öäVçG'•µÓ°¢Ó°¢6WEv÷&¶÷WG2‡&V6öæ6–ÆVBçv÷&¶÷WG2“°¢6WDÖVÇ2‡&V6öæ6–ÆVBæÖVÇ2“°¢6WD‡–G&F–öâ‡&V6öæ6–ÆVBæ‡–G&F–öâ“°¢6WDÆöDW'&÷"†çVÆÂ“°¢–b‡&W7F÷&VBæÆVæwF‚’fö–B&WG'’‚“°¢Ò¢æ6F6‚‚†W'&÷"’Óâ°¢–b‚6æ6VÆÆVB’6WDÆöDW'&÷"†66÷VçD—77VTg&öÔW'&÷"†W'&÷"’“°¢Ò¢æf–æÆÇ’‚‚’Óâ°¢–b‚6æ6VÆÆVB’6WE&VG’‡G'VR“°¢Ò“°¢&WGW&â‚’Óâ°¢6æ6VÆÆVBÒG'VS°¢Ó°¢ÒÂ¶66÷VçD&6¶VBÂ&WG'•Ò“° ¢W6TVffV7B‚‚’Óâ°¢6öç7BöæÆ–æRÒ‚’Óâfö–B&WG'’‚“°¢v–æF÷ræFDWfVçDÆ—7FVæW"‚&öæÆ–æR"ÂöæÆ–æR“°¢&WGW&â‚’Óâv–æF÷rç&VÖ÷fTWfVçDÆ—7FVæW"‚&öæÆ–æR"ÂöæÆ–æR“°¢ÒÂ·&WG'•Ò“° ¢6öç7BFEv÷&¶÷WBÒW6T6ÆÆ&6²‚‡&V6÷&C¢v÷&¶÷WE7VÖÖ'’’Óâ°¢6WEv÷&¶÷WG2‚†7W'&VçB’Óâ·&V6÷&BÂââæ7W'&VçBæf–ÇFW"‚†—FVÒ’Óâ—FVÒæ–BÓÒ&V6÷&Bæ–B•Òç6Æ–6RƒÂ’“°¢'Vä×WFF–öâ‡²¶W“¢7&VFS§v÷&¶÷WC¢G·&V6÷&Bæ–GÖÂÖWF†öC¢%õ5B"ÂG—S¢'v÷&¶÷WB"Â–C¢&V6÷&Bæ–BÂ&V6÷&BÂ7&VFVDC¢FFRææ÷r‚’Ò“°¢ÒÂ·'Vä×WFF–öåÒ“° ¢6öç7BFDÖVÂÒW6T6ÆÆ&6²‚‡&V6÷&C¢ÖVÂ’Óâ°¢6WDÖVÇ2‚†7W'&VçB’Óâ·&V6÷&BÂââæ7W'&VçBæf–ÇFW"‚†—FVÒ’Óâ—FVÒæ–BÓÒ&V6÷&Bæ–B•Òç6Æ–6RƒÂ’“°¢'Vä×WFF–öâ‡²¶W“¢7&VFS¦ÖVÃ¢G·&V6÷&Bæ–GÖÂÖWF†öC¢%õ5B"ÂG—S¢&ÖVÂ"Â–C¢&V6÷&Bæ–BÂ&V6÷&BÂ7&VFVDC¢FFRææ÷r‚’Ò“°¢ÒÂ·'Vä×WFF–öåÒ“° ¢6öç7BFD‡–G&F–öâÒW6T6ÆÆ&6²‚‡&V6÷&C¢‡–G&F–öäVçG'’’Óâ°¢6WD‡–G&F–öâ‚†7W'&VçB’Óâ·&V6÷&BÂââæ7W'&VçBæf–ÇFW"‚†—FVÒ’Óâ—FVÒæ–BÓÒ&V6÷&Bæ–B•Òç6Æ–6RƒÂ#’“°¢'Vä×WFF–öâ‡²¶W“¢7&VFS¦‡–G&F–öã¢G·&V6÷&Bæ–GÖÂÖWF†öC¢%õ5B"ÂG—S¢&‡–G&F–öâ"Â–C¢&V6÷&Bæ–BÂ&V6÷&BÂ7&VFVDC¢FFRææ÷r‚’Ò“°¢ÒÂ·'Vä×WFF–öåÒ“° ¢6öç7B&VÖ÷fU&V6÷&BÒW6T6ÆÆ&6²‚‡G—S¢&V6÷&D¶–æBÂ–C¢7G&–ær’Óâ°¢–b‡G—RÓÓÒ'v÷&¶÷WB"’6WEv÷&¶÷WG2‚†7W'&VçB’Óâ7W'&VçBæf–ÇFW"‚†—FVÒ’Óâ—FVÒæ–BÓÒ–B’“°¢–b‡G—RÓÓÒ&ÖVÂ"’6WDÖVÇ2‚†7W'&VçB’Óâ7W'&VçBæf–ÇFW"‚†—FVÒ’Óâ—FVÒæ–BÓÒ–B’“°¢–b‡G—RÓÓÒ&‡–G&F–öâ"’6WD‡–G&F–öâ‚†7W'&VçB’Óâ7W'&VçBæf–ÇFW"‚†—FVÒ’Óâ—FVÒæ–BÓÒ–B’“°¢'Vä×WFF–öâ‡²¶W“¢FVÆWFS¢G·G—WÓ¢G¶–GÖÂÖWF†öC¢$DTÄUDR"ÂG—RÂ–BÂ7&VFVDC¢FFRææ÷r‚’Ò“°¢ÒÂ·'Vä×WFF–öåÒ“° ¢6öç7BWFFU&V6÷&BÒW6T6ÆÆ&6²‚‡G—S¢&V6÷&D¶–æBÂ&V6÷&C¢v÷&¶÷WE7VÖÖ'’ÂÖVÂÂ‡–G&F–öäVçG'’’Óâ°¢6öç7B6÷'&V7FVBÒ²ââç&V6÷&BÂ6÷'&V7FVDC¢æWrFFR‚’çFô•4õ7G&–ær‚’Ó°¢–b‡G—RÓÓÒ'v÷&¶÷WB"’°¢6WEv÷&¶÷WG2‚†7W'&VçB’Óâ7W'&Vç@¢æÖ‚†—FVÒ’Óâ—FVÒæ–BÓÓÒ&V6÷&Bæ–Bò6÷'&V7FVB2v÷&¶÷WE7VÖÖ'’¢—FVÒ¢ç6÷'B‚†Â"’Óâ"æ6ö×ÆWFVDBÒæ6ö×ÆWFVDB’“°¢Ð¢–b‡G—RÓÓÒ&ÖVÂ"’°¢6WDÖVÇ2‚†7W'&VçB’Óâ7W'&Vç@¢æÖ‚†—FVÒ’Óâ—FVÒæ–BÓÓÒ&V6÷&Bæ–Bò6÷'&V7FVB2ÖVÂ¢—FVÒ¢ç6÷'B‚†Â"’Óâ"ç&V6÷&FVDBÒç&V6÷&FVDB’“°¢Ð¢–b‡G—RÓÓÒ&‡–G&F–öâ"’°¢6WD‡–G&F–öâ‚†7W'&VçB’Óâ7W'&Vç@¢æÖ‚†—FVÒ’Óâ—FVÒæ–BÓÓÒ&V6÷&Bæ–Bò6÷'&V7FVB2‡–G&F–öäVçG'’¢—FVÒ¢ç6÷'B‚†Â"’Óâ"ç&V6÷&FVDBÒç&V6÷&FVDB’“°¢Ð¢'Vä×WFF–öâ‡²¶W“¢WFFS¢G·G—WÓ¢G·&V6÷&Bæ–GÖÂÖWF†öC¢%D4‚"ÂG—RÂ–C¢&V6÷&Bæ–BÂ&V6÷&BÂ7&VFVDC¢FFRææ÷r‚’Ò“°¢ÒÂ·'Vä×WFF–öåÒ“° ¢6öç7BFöF•7F'BÒæWrFFR‚“°¢FöF•7F'Bç6WD†÷W'2ƒÂÂÂ“°¢6öç7BFöF•F–ÖW7F×ÒFöF•7F'BævWEF–ÖR‚“°¢6öç7BFöF”ÖVÇ2ÒÖVÇ2æf–ÇFW"‚†ÖVÂ’ÓâÖVÂç&V6÷&FVDBãÒFöF•F–ÖW7F×“°¢6öç7BFöF”‡–G&F–öâÒ‡–G&F–öâæf–ÇFW"‚†VçG'’’ÓâVçG'’ç&V6÷&FVDBãÒFöF•F–ÖW7F×“° ¢&WGW&â°¢v÷&¶÷WG2À¢ÖVÇ3¢FöF”ÖVÇ2À¢‡–G&F–öã¢FöF”‡–G&F–öâÀ¢vFW#¢ÖF‚æÖ‚ƒÂFöF”‡–G&F–öâç&VGV6R‚‡F÷FÂÂVçG'’’ÓâF÷FÂ²VçG'’æÖ÷VçDÖÂÂ’’À¢&VG’À¢ÆöDW'&÷"À¢7–æ4W'&÷"À¢&WG'’À¢FEv÷&¶÷WBÀ¢FDÖVÂÀ¢FD‡–G&F–öâÀ¢WFFU&V6÷&BÀ¢&VÖ÷fU&V6÷&BÀ¢Ó°§Ð ¦gVæ7F–öâVçG'”fÆ÷r‡²öäVçFW"Â–æ—F–Å7FvRÒ&ÆæF–ær"Ó¢²öäVçFW#¢†ÖöFS¢ÆVæ6„ÖöFR’Óâfö–C²–æ—F–Å7FvSó¢W†6ÇVFSÄVçG'•7FvRÂ&#âÒ’°¢6öç7B·7FvRÂ6WE7FvUÒÒW6U7FFSÄW†6ÇVFSÄVçG'•7FvRÂ&#ãâ†–æ—F–Å7FvR“°¢6öç7B·7FWÂ6WE7FWÒÒW6U7FFRƒ“°¢6öç7B¶vöÂÂ6WDvöÅÒÒW6U7FFR‚%7G&VæwF‚"“°¢6öç7B¶F—2Â6WDF—5ÒÒW6U7FFR‚#RF—2"“°¢6öç7B¶6ö6…7G–ÆRÂ6WD6ö6…7G–ÆUÒÒW6U7FFR‚$&Ææ6VB"“° ¢–b‡7FvRÓÓÒ&ÆæF–ær"’°¢&WGW&â€¢ÆF—b6Æ74æÖSÒ&VçG'’×6†VÆÂÆæF–ær×vR#à¢Äf÷&vTÖ&–Væ6RFVç6—G“×³3gÒóà¢Æ†VFW"6Æ74æÖSÒ&VçG'’Öæb#à¢Æ'WGFöâ6Æ74æÖSÒ&VçG'’Ö'&æB"&–ÖÆ&VÃÒ$f÷&vR†öÖR#ãÇ7G&öæsädõ$tSÂ÷7G&öæsãÂö'WGFöãà¢Ææb6Æ74æÖSÒ&ÆæF–ærÖæbÖÆ–æ·2"&–ÖÆ&VÃÒ$ÆæF–æræf–vF–öâ#à¢Æ‡&VcÒ"6†÷rÖ—B×v÷&·2#ä†÷r—Bv÷&·3Âöà¢Æ‡&VcÒ"6–ç6–FRÖf÷&vR#ä–ç6–FRdõ$tSÂöà¢Âöæcà¢Æ'WGFöâ6Æ74æÖSÒ&VçG'’ÖÆöv–âÖÆ–æ²"öä6Æ–6³×²‚’Óâ6WE7FvR‚&Æöv–â"—Óå6–vâ–âÇ7ãî(isÂ÷7ããÂö'WGFöãà¢Âö†VFW#à ¢ÆÖ–â6Æ74æÖSÒ&ÆæF–ærÖÖ–â#à¢Ç6V7F–öâ6Æ74æÖSÒ&ÆæF–ærÖ†W&ò#à¢ÆF—b6Æ74æÖSÒ&ÆæF–ærÖ6÷’#à¢Ç6Æ74æÖSÒ&VçG'’ÖW–V'&÷r#åG&–æ–ærÂfööBÂ&V6÷fW'’ÂöæR6ÆV"Æ6SÂ÷à¢Æƒä¶æ÷rv†BFòFòãÆ'"óãÆVÓåF†VâFòF†Rv÷&²ãÂöVÓãÂöƒà¢Ç6Æ74æÖSÒ&ÆæF–ærÖÆVB#ädõ$tR¶VW2–÷W"ÆâÂv÷&¶÷WBÆörÂçWG&—F–öâæB&öw&W72FövWF†W.(	G6ò–÷R7VæBÆW72F–ÖR6÷'F–ærFFæBÖ÷&RF–ÖR'V–ÆF–ær–÷W'6VÆbãÂ÷à¢ÆF—b6Æ74æÖSÒ&ÆæF–ærÖ7F–öç2#à¢Æ'WGFöâ6Æ74æÖSÒ&VçG'’×&–Ö'’"öä6Æ–6³×²‚’Óâ6WE7FvR‚&öæ&ö&F–ær"—Óå6WBW×’ÆâÇ7ãî(i#Â÷7ããÂö'WGFöãà¢Æ6Æ74æÖSÒ&VçG'’Öv†÷7B"‡&VcÒ"6†÷rÖ—B×v÷&·2#å6VR†÷r—Bv÷&·3Âöà¢ÂöF—cà¢ÆF—b6Æ74æÖSÒ&ÆæF–ær×&ööb"&–ÖÆ&VÃÒ%v†Bf÷&vR†VÇ2v—F‚#à¢ÆF—cãÇ7G&öæsåFöF“Â÷7G&öæsãÇ7ãå6VRF†RæW‡BW6VgVÂ7F–öãÂ÷7ããÂöF—cà¢ÆF—cãÇ7G&öæsåG&–ãÂ÷7G&öæsãÇ7ãäÆörv—F†÷WBÆVf–ærF†RfÆ÷sÂ÷7ããÂöF—cà¢ÆF—cãÇ7G&öæså&öw&W73Â÷7G&öæsãÇ7ãäÆV&âv†BF†Rv÷&²6†ævVCÂ÷7ããÂöF—cà¢ÂöF—cà¢ÂöF—cà ¢ÆF—b6Æ74æÖSÒ&ÆæF–ærÖÖöæöÆ—F‚"&–ÖÆ&VÃÒ$W†×ÆRG&–æ–ærF’#à¢ÆF—b6Æ74æÖSÒ&ÖöÇFVâÖVFvR"&–Ö†–FFVãÒ'G'VR"óà¢Æ†VFW#ãÇ7ãäW†×ÆRF“Â÷7ããÇ6ÖÆÃåGVW6F“Â÷6ÖÆÃãÂö†VFW#à¢ÆF—b6Æ74æÖSÒ&ÖöæöÆ—F‚×6W76–öâ#à¢Ç6ÖÆÃäæW‡B6W76–öãÂ÷6ÖÆÃà¢Æƒ#åWW"7G&VæwFƒÂöƒ#à¢Çä6†W7B+r&6²+r6†÷VÆFW'3Â÷à¢ÂöF—cà¢ÆöÃà¢ÆÆ“ãÇ7ããÂ÷7ããÇãÇ7G&öæsä–æ6Æ–æR&W73Â÷7G&öæsãÇ6ÖÆÃãBv÷&¶–ær6WG3Â÷6ÖÆÃãÂ÷ãÂöÆ“à¢ÆÆ“ãÇ7ãã#Â÷7ããÇãÇ7G&öæsåvV–v‡FVBVÆÂ×WÂ÷7G&öæsãÇ6ÖÆÃã2v÷&¶–ær6WG3Â÷6ÖÆÃãÂ÷ãÂöÆ“à¢ÆÆ“ãÇ7ãã3Â÷7ããÇãÇ7G&öæså6†÷VÆFW"&W73Â÷7G&öæsãÇ6ÖÆÃã2v÷&¶–ær6WG3Â÷6ÖÆÃãÂ÷ãÂöÆ“à¢ÂööÃà¢Æfö÷FW#ãÇ7ãåÆâ&VG“Â÷7ããÇ7G&öæså7F'Bv†Vâ–÷R&SÂ÷7G&öæsãÂöfö÷FW#à¢ÂöF—cà¢Â÷6V7F–öãà ¢Ç6V7F–öâ6Æ74æÖSÒ&ÆæF–ær×7—7FVÒ"–CÒ&†÷rÖ—B×v÷&·2#à¢Æ†VFW"6Æ74æÖSÒ&ÆæF–ær×6V7F–öâÖ†VB#à¢Ç6Æ74æÖSÒ&VçG'’ÖW–V'&÷r#ä†÷r—Bv÷&·3Â÷à¢ÆF—cà¢Æƒ#äöæRÆö÷–÷R6âVæFW'7FæBãÂöƒ#à¢Çä÷Vâdõ$tRÂ6VRv†BÖGFW'2ÂFòF†Rv÷&²æB&V6÷&BF†R&W7VÇBâFöÖ÷'&÷r7F'G2g&öÒv†B7GVÆÇ’†VæVBãÂ÷à¢ÂöF—cà¢Âö†VFW#à¢ÆF—b6Æ74æÖSÒ'7—7FVÒ×&–Â#à¢µ°¢²#"Â%FöF’"Â%–÷W"&V6÷fW'’Â66†VGVÆRæBæW‡BW6VgVÂ7F–öââ%ÒÀ¢²#""Â%G&–â"Â%–÷W"ÆâæBv÷&¶÷WBÆör–âF†R6ÖRfÆ÷râ%ÒÀ¢²#2"Â$gVVÂ"Â$ÖVÇ2ÂÖ7&÷2æB‡–G&F–öâv—F†÷WB7&VG6†VWBæö—6Râ%ÒÀ¢²#B"Â$6ö6‚"Â$wV–Fæ6RF†BW6W2F†R6öçFW‡B–÷R6†ö÷6RFò6†&Râ%ÒÀ¢²#R"Â%&öw&W72"Â%7G&VæwF‚Â&öG’æB6öç6—7FVæ7’6†÷vâ6ÆV&Ç’â%ÒÀ¢ÒæÖ‚…¶çVÖ&W"ÂF—FÆRÂ6÷•Ò’Óâ€¢Æ'F–6ÆR¶W“×·F—FÆWÓà¢Ç6ÖÆÃç¶çVÖ&W'ÓÂ÷6ÖÆÃà¢Æƒ3ç·F—FÆWÓÂöƒ3à¢Çç¶6÷—ÓÂ÷à¢Æ’&–Ö†–FFVãÒ'G'VR#î(	CÂö“à¢Âö'F–6ÆSà¢’—Ð¢ÂöF—cà¢Â÷6V7F–öãà ¢Ç6V7F–öâ6Æ74æÖSÒ&ÆæF–ærÖ6öÖÖæB"–CÒ&–ç6–FRÖf÷&vR#à¢ÆF—b6Æ74æÖSÒ&ÆæF–ærÖ6öÖÖæBÖ6÷’#à¢Ç6Æ74æÖSÒ&VçG'’ÖW–V'&÷r#ä'V–ÇBf÷"F†Rw–ÒfÆö÷#Â÷à¢Æƒ#äÆW72F6†&ö&BãÆ'"óäÖ÷&RF—&V7F–öâãÂöƒ#à¢Çädõ$tRÖ¶W2F†RæW‡B7F–öâö'f–÷W2æB¶VW26V6öæF'’FWF–Â÷WBöb–÷W"v’VçF–Â–÷RæVVB—BãÂ÷à¢ÇVÃà¢ÆÆ“ãÇ7ããÂ÷7ãå7F'B÷"F§W7BFöFž(	—26W76–öãÂöÆ“à¢ÆÆ“ãÇ7ãã#Â÷7ãäÆör6WG2ÂÖVÇ2æBvFW"V–6¶Ç“ÂöÆ“à¢ÆÆ“ãÇ7ãã3Â÷7ãå&Wf–Wr&öw&W72v—F†÷WBfæ—G’æö—6SÂöÆ“à¢Â÷VÃà¢ÂöF—cà¢ÆF—b6Æ74æÖSÒ&6öÖÖæB×V’"&–ÖÆ&VÃÒ%6×ÆRf÷&vRv÷&¶÷WB#à¢Æ†VFW#ãÇ7ãå6×ÆRv÷&¶÷WCÂ÷7ããÆ“ä–â&öw&W73Âö“ãÂö†VFW#à¢ÆF—b6Æ74æÖSÒ&6öÖÖæBÖw&VWF–ær#ãÇ6ÖÆÃåWW"7G&VæwFƒÂ÷6ÖÆÃãÇ7G&öæsåF‡&VRÖ÷fVÖVçG2ÆVgBãÂ÷7G&öæsãÂöF—cà¢ÆF—b6Æ74æÖSÒ&6öÖÖæBÖw&–B#à¢Æ'F–6ÆR6Æ74æÖSÒ&6öÖÖæB×6W76–öâ#à¢Ç6ÖÆÃä7W'&VçBÖ÷fVÖVçCÂ÷6ÖÆÃà¢Æƒ3ä–æ6Æ–æRGVÖ&&VÆÂ&W73Âöƒ3à¢ÇägVÆÂ&ævR+r6öçG&öÆÆVBFV×óÂ÷à¢ÆF—cãÇ7ãã3¶sÇ6ÖÆÃåvV–v‡CÂ÷6ÖÆÃãÂ÷7ããÇ7ããƒÇ6ÖÆÃå&W3Â÷6ÖÆÃãÂ÷7ããÇ7ãã#Ç6ÖÆÃå&W2–â&W6W'fSÂ÷6ÖÆÃãÂ÷7ããÂöF—cà¢Æ'WGFöâöä6Æ–6³×²‚’Óâ6WE7FvR‚&öæ&ö&F–ær"—Óä'V–ÆB×’ÆâÆ#î(i#Âö#ãÂö'WGFöãà¢Âö'F–6ÆSà¢Æ'F–6ÆR6Æ74æÖSÒ&6öÖÖæB×66÷&R#à¢Ç6ÖÆÃåv‡’F†—2ÖGFW'3Â÷6ÖÆÃà¢Ç7G&öæsä6ÆV#ÆVÓâÂæ÷B7&÷vFVCÂöVÓãÂ÷7G&öæsà¢ÇåF†R6öçG&öÇ2–÷RæVVB7F’6Æ÷6RâWfW'—F†–ærVÇ6Rv—G2ãÂ÷à¢Âö'F–6ÆSà¢ÂöF—cà¢ÂöF—cà¢Â÷6V7F–öãà ¢Ç6V7F–öâ6Æ74æÖSÒ&ÆæF–ærÖ–çFVÆÆ–vVæ6R#à¢ÆF—b6Æ74æÖSÒ&ÆæF–ærÖ&VÆ–Vb#à¢Ç6Æ74æÖSÒ&VçG'’ÖW–V'&÷r#åF†R&öÆRöbdõ$tSÂ÷à¢Æƒ#åvR7FæB&W6–FR–÷RãÆ'"óåvRFòæ÷BFòF†Rv÷&²f÷"–÷RãÂöƒ#à¢Çädõ$tR†VÇ2Ö¶RG&–æ–ærV6–W"FòVæFW'7FæBæBV6–W"Fò6öçF–çVRâ–÷W"Vff÷'BÂ6†ö–6W2æB6öç6—7FVæ7’FV6–FRF†R÷WF6öÖRãÂ÷à¢ÂöF—cà¢ÆF—b6Æ74æÖSÒ&ÆæF–ærÖ&VÆ–VbÖÆ–æW2#à¢ÇãÇ7ãåG&–ãÂ÷7ããÇ7G&öæsäÆâ–÷R6âföÆÆ÷rFöF’ãÂ÷7G&öæsãÂ÷à¢ÇãÇ7ãägVVÃÂ÷7ããÇ7G&öæså6–×ÆR&V6÷&G2–÷R6â6÷'&V7BãÂ÷7G&öæsãÂ÷à¢ÇãÇ7ãä6ö6ƒÂ÷7ããÇ7G&öæsä6öçFW‡Bv†Vâ–÷RæVVB6V6öæB÷–æ–öâãÂ÷7G&öæsãÂ÷à¢ÇãÇ7ãå&öw&W73Â÷7ããÇ7G&öæsäWf–FVæ6Röbv†B6†ævVB÷fW"F–ÖRãÂ÷7G&öæsãÂ÷à¢ÂöF—cà¢Â÷6V7F–öãà ¢Ç6V7F–öâ6Æ74æÖSÒ&ÆæF–ærÖf–æÂ#à¢Ç6Æ74æÖSÒ&VçG'’ÖW–V'&÷r#å7F'Bv—F‚öæR†öæW7BvöÃÂ÷à¢Æƒ#ä'V–ÆBÆâF†Bf—G2–÷W"Æ–fRãÂöƒ#à¢ÇåF‡&VR6†÷'BVW7F–öç2â–÷R6â6†ævRWfW'’ç7vW"ÆFW"ãÂ÷à¢Æ'WGFöâ6Æ74æÖSÒ&VçG'’×&–Ö'’"öä6Æ–6³×²‚’Óâ6WE7FvR‚&öæ&ö&F–ær"—Óå6WBWdõ$tRÇ7ãî(i#Â÷7ããÂö'WGFöãà¢Â÷6V7F–öãà¢ÂöÖ–ãà ¢Æfö÷FW"6Æ74æÖSÒ&VçG'’Öfö÷FW"ÆæF–ærÖfö÷FW"#ãÇ7ãädõ$tRò##cÂ÷7ããÆ’óãÇä'V–ÇBFò7W÷'BF†Rv÷&²ãÂ÷ãÂöfö÷FW#à¢ÂöF—cà¢“°¢Ð ¢–b‡7FvRÓÓÒ&Æöv–â"’°¢&WGW&â€¢ÆF—b6Æ74æÖSÒ&VçG'’×6†VÆÂÆöv–â×vR#à¢Äf÷&vTÖ&–Væ6RFVç6—G“×³#Òóà¢Æ'WGFöâ6Æ74æÖSÒ&VçG'’Ö&6²"öä6Æ–6³×²‚’Óâ6WE7FvR‚&ÆæF–ær"—Óî(i&6³Âö'WGFöãà¢Æ'WGFöâ6Æ74æÖSÒ&VçG'’Ö'&æBÆöv–âÖ'&æB"öä6Æ–6³×²‚’Óâ6WE7FvR‚&ÆæF–ær"—Ò&–ÖÆ&VÃÒ$f÷&vR†öÖR#ãÇ7G&öæsädõ$tSÂ÷7G&öæsãÂö'WGFöãà¢Ç6V7F–öâ6Æ74æÖSÒ&Æöv–âÖÖæ–fW7Fò#à¢Ç6Æ74æÖSÒ&VçG'’ÖW–V'&÷r#åvVÆ6öÖR&6³Â÷à¢Æƒä6öçF–çVRv†W&SÆ'"óãÆVÓç–÷RÆVgBöfbãÂöVÓãÂöƒà¢Æ&Æö6·V÷FSå–÷W"ÆâÂ&V6÷&G2æB&öw&W727F’v—F‚–÷W"66÷VçN(	Fæ÷Bv—F‚F†—2'&÷w6W"ãÂö&Æö6·V÷FSà¢ÆF—b6Æ74æÖSÒ&Æöv–â×ö–çG2#à¢ÇãÇ7ããÂ÷7ããÇ7G&öæsäöæR6V7W&R6–vâÖ–ãÂ÷7G&öæsãÇ6ÖÆÃåW6RF†R6ÖR6†DuB66÷VçB–÷RW6VB&Vf÷&RãÂ÷6ÖÆÃãÂ÷à¢ÇãÇ7ãã#Â÷7ããÇ7G&öæsäæòdõ$tR77v÷&CÂ÷7G&öæsãÇ6ÖÆÃädõ$tRæWfW"6·2f÷"÷"7F÷&W2–÷W"77v÷&BãÂ÷6ÖÆÃãÂ÷à¢ÇãÇ7ãã3Â÷7ããÇ7G&öæså–÷W"v÷&²7F—2–÷W'3Â÷7G&öæsãÇ6ÖÆÃä66÷VçBFF—2¶WB6W&FRg&öÒ÷F†W"F†ÆWFW2ãÂ÷6ÖÆÃãÂ÷à¢ÂöF—cà¢Â÷6V7F–öãà¢Ç6V7F–öâ6Æ74æÖSÒ&Æöv–â×æVÂ#à¢ÆF—b6Æ74æÖSÒ&Æöv–âÖ6&B#à¢Ç6Æ74æÖSÒ&Æöv–âÖ–æFW‚#å6V7W&R6–vâ–ãÂ÷à¢Æ†VFW#ãÇãÇ7G&öæså&VG’v†Vâ–÷R&RãÂ÷7G&öæsãÇ6ÖÆÃä6öçF–çVRv—F‚6†DuBFò÷Vâ–÷W"dõ$tR66÷VçBãÂ÷6ÖÆÃãÂ÷ãÂö†VFW#à¢ÆF—b6Æ74æÖSÒ'6V7W&RÖVçG'’Ö6÷’#à¢Ç7ãä&Vf÷&R–÷R6öçF–çVSÂ÷7ãà¢Çä6†V6²F†BF†R6†DuB66÷VçB–âF†R6–vâÖ–âv–æF÷r—2F†R66÷VçB–÷RvçBGF6†VBFò–÷W"G&–æ–ær&V6÷&G2ãÂ÷à¢ÂöF—cà¢Æ'WGFöâ6Æ74æÖSÒ&VçG'’×&–Ö'’6V7W&RÖVçG'’Ö7F–öâ"öä6Æ–6³×²‚’ÓâöäVçFW"‚'&WGW&â"—Óä6öçF–çVRv—F‚6†DuBÇ7ãî(i#Â÷7ããÂö'WGFöãà¢Ç6ÖÆÂ6Æ74æÖSÒ'6V7W&RÖVçG'’Öæ÷FR#ädõ$tR&V6V—fW2–÷W"fW&–f–VB–FVçF—G’â—BFöW2æ÷B&V6V—fR–÷W"77v÷&BãÂ÷6ÖÆÃà¢Æfö÷FW#äæWrFòdõ$tSòÆ'WGFöâöä6Æ–6³×²‚’Óâ6WE7FvR‚&öæ&ö&F–ær"—Óå6WBW–÷W"ÆãÂö'WGFöããÂöfö÷FW#à¢ÂöF—cà¢Â÷6V7F–öãà¢ÂöF—cà¢“°¢Ð ¢6öç7Böæ&ö&F–ætFFÒ7FWÓÓÒò°¢W–V'&÷s¢%–÷W"vöÂ"À¢F—FÆS¢%v†B&R–÷RG&–æ–ærf÷#ò"À¢6÷“¢$6†ö÷6RöæR7F'F–ærö–çBâ–÷R6â6†ævR—BÆFW"â"À¢÷F–öç3¢°¢²%7G&VæwF‚"Â$vWB7G&öævW"–âF†RÆ–gG2F†BÖGFW"Fò–÷Râ"Â#%ÒÀ¢²$×W66ÆR"Â$'V–ÆB6—¦Rv—F‚ÖævV&ÆRvVV¶Ç’föÇVÖRâ"Â#"%ÒÀ¢²$‡–'&–B"Â$&Ææ6R7G&VæwF‚v—F‚6öæF—F–öæ–ærâ"Â#2%ÒÀ¢ÒÀ¢fÇVS¢vöÂÀ¢6WEfÇVS¢6WDvöÂÀ¢Ò¢7FWÓÓÒ"ò°¢W–V'&÷s¢%–÷W"vVV²"À¢F—FÆS¢$†÷rögFVâ6â–÷RG&–ãò"À¢6÷“¢%–6²F†R&‡—F†Ò–÷R6â&WVBöâæ÷&ÖÂvVV²â"À¢÷F–öç3¢°¢²#2F—2"Â$fö7W6VB6W76–öç2v—F‚Ö÷&R&V6÷fW'’â"Â#2%ÒÀ¢²#BF—2"Â$&Ææ6VBG&–æ–ærvVV²â"Â#B%ÒÀ¢²#RF—2"Â$Ö÷&Rg&WVVçBÂ6†÷'FW"W‡÷7W&W2â"Â#R%ÒÀ¢ÒÀ¢fÇVS¢F—2À¢6WEfÇVS¢6WDF—2À¢Ò¢°¢W–V'&÷s¢%–÷W"wV–Fæ6R"À¢F—FÆS¢$†÷r6†÷VÆBF†R6ö6‚&W7öæCò"À¢6÷“¢$6†ö÷6RF†RFöæR–÷Rv–ÆÂ7GVÆÇ’Æ—7FVâFòâ"À¢÷F–öç3¢°¢²%&÷FV7F—fR"Â$Ö÷&R6WF–öâ&÷VæBfF–wVRæB¦ö–çB7G&W72â"Â%%ÒÀ¢²$&Ææ6VB"Â$F—&V7BwV–Fæ6Rv—F‚6Vç6–&ÆRwV&G&–Ç2â"Â$"%ÒÀ¢²%&VÆVçFÆW72"Â%6†÷'BÂFVÖæF–ær7VW2v—F‚ÆW72&V77W&æ6Râ"Â%"%ÒÀ¢ÒÀ¢fÇVS¢6ö6…7G–ÆRÀ¢6WEfÇVS¢6WD6ö6…7G–ÆRÀ¢Ó° ¢&WGW&â€¢ÆF—b6Æ74æÖSÒ&VçG'’×6†VÆÂöæ&ö&F–ær×vR#à¢Äf÷&vTÖ&–Væ6RFVç6—G“×³‡Òóà¢Æ†VFW"6Æ74æÖSÒ&öæ&ö&F–ærÖæb#à¢Æ'WGFöâ6Æ74æÖSÒ&VçG'’Ö'&æB"öä6Æ–6³×²‚’Óâ6WE7FvR‚&ÆæF–ær"—ÓãÇ7G&öæsädõ$tSÂ÷7G&öæsãÂö'WGFöãà¢ÆF—b6Æ74æÖSÒ&öæ&ö&F–ær×&öw&W72#ãÇ7ãå7FWÂ÷7ããÆF—cçµ³Ã"Ã5ÒæÖ‚†—FVÒ’ÓâÆ’6Æ74æÖS×¶—FVÒÃÒ7FWò&7F—fR"¢"'Ò¶W“×¶—FV×Òóâ—ÓÂöF—cãÆ#ç·7FWÒöb3Âö#ãÂöF—cà¢Æ'WGFöâ6Æ74æÖSÒ&öæ&ö&F–ær×6¶—"öä6Æ–6³×²‚’ÓâöäVçFW"‚&æWr"—Óå6¶—f÷"æ÷sÂö'WGFöãà¢Âö†VFW#à¢ÆÖ–â6Æ74æÖSÒ&öæ&ö&F–ær×7FvR#à¢ÆF—b6Æ74æÖSÒ&öæ&ö&F–ærÖ6÷’#à¢Ç7â6Æ74æÖSÒ&öæ&ö&F–ær×7FWÖÖ&²#ã·7FWÓÂ÷7ãà¢Ç6Æ74æÖSÒ&VçG'’ÖW–V'&÷r#ç¶öæ&ö&F–ætFFæW–V'&÷wÓÂ÷à¢Æƒç¶öæ&ö&F–ætFFçF—FÆWÓÂöƒà¢Çç¶öæ&ö&F–ætFFæ6÷—ÓÂ÷à¢ÆF—b6Æ74æÖSÒ&öæ&ö&F–ær×&–æ6—ÆR#à¢Ç6ÖÆÃåv‡’vR6³Â÷6ÖÆÃà¢Çç·7FWÓÓÒò$6ÆV"&–÷&—G’†VÇ2W2&VÖ÷fRv÷&²F†BFöW2æ÷B6W'fR–÷Râ"¢7FWÓÓÒ"ò$ÆâöæÇ’v÷&·2v†Vâ—Bf—G2F†RvVV²–÷R&VÆÇ’†fRâ"¢%W6VgVÂwV–Fæ6R6†÷VÆBÖF6‚†÷r–÷R&VfW"FòÖ¶RFV6—6–öç2â'ÓÂ÷à¢ÂöF—cà¢ÂöF—cà¢ÆF—b6Æ74æÖSÒ&öæ&ö&F–ærÖFV6—6–öâ#à¢ÆF—b6Æ74æÖSÒ&öæ&ö&F–ærÖ÷F–öç2#à¢¶öæ&ö&F–ætFFæ÷F–öç2æÖ‚…¶æÖRÂ6÷’ÂÖ&µÒ’Óâ€¢Æ'WGFöâ6Æ74æÖS×¶öæ&ö&F–ætFFçfÇVRÓÓÒæÖRò'6VÆV7FVB"¢"'Òöä6Æ–6³×²‚’Óâöæ&ö&F–ætFFç6WEfÇVR†æÖR—Ò¶W“×¶æÖWÓà¢Ç6ÖÆÃç¶Ö&·ÓÂ÷6ÖÆÃãÇ7ããÇ7G&öæsç¶æÖWÓÂ÷7G&öæsãÆVÓç¶6÷—ÓÂöVÓãÂ÷7ããÆ“ç¶öæ&ö&F–ætFFçfÇVRÓÓÒæÖRò.)É2"¢.)x²'ÓÂö“à¢Âö'WGFöãà¢’—Ð¢ÂöF—cà¢ÆF—b6Æ74æÖSÒ&öæ&ö&F–ærÖÆ—fR×7VÖÖ'’"&–ÖÆ&VÃÒ%–÷W"7W'&VçB6†ö–6W2#à¢Ç7ããÇ6ÖÆÃävöÃÂ÷6ÖÆÃãÇ7G&öæsç¶vöÇÓÂ÷7G&öæsãÂ÷7ãà¢Ç7ããÇ6ÖÆÃäF—3Â÷6ÖÆÃãÇ7G&öæsç¶F—7ÓÂ÷7G&öæsãÂ÷7ãà¢Ç7ããÇ6ÖÆÃä6ö6ƒÂ÷6ÖÆÃãÇ7G&öæsç¶6ö6…7G–ÆWÓÂ÷7G&öæsãÂ÷7ãà¢ÂöF—cà¢ÆF—b6Æ74æÖSÒ&öæ&ö&F–ærÖ7F–öç2#à¢Æ'WGFöâF—6&ÆVC×·7FWÓÓÒÒöä6Æ–6³×²‚’Óâ6WE7FW‚†7W'&VçB’ÓâÖF‚æÖ‚ƒÂ7W'&VçBÒ’—Óî(i&6³Âö'WGFöãà¢Æ'WGFöâ6Æ74æÖSÒ&VçG'’×&–Ö'’"öä6Æ–6³×²‚’Óâ7FWÂ2ò6WE7FW‡7FW²’¢öäVçFW"‚&æWr"—Óç·7FWÂ2ò$6öçF–çVR"¢$'V–ÆB×’Æâ'ÒÇ7ãî(i#Â÷7ããÂö'WGFöãà¢ÂöF—cà¢ÂöF—cà¢ÂöÖ–ãà¢Æfö÷FW"6Æ74æÖSÒ&öæ&ö&F–ærÖfö÷FW"#ãÇ7ãäæ÷F†–ær—2W&ÖæVçBãÂ÷7ããÇ7G&öæså–÷R6â6†ævRF†W6R6†ö–6W2ÆFW"ãÂ÷7G&öæsãÂöfö÷FW#à¢ÂöF—cà¢“°§Ð ¦W‡÷'BFVfVÇBgVæ7F–öâ†öÖR‡°¢–æ—F–ÄVçG'•7FvRÒ&ÆæF–ær"À¢–æ—F–ÄÆVæ6„ÖöFRÒçVÆÂÀ¢WF†VçF–6FVEW6W"ÒçVÆÂÀ§Ó¢°¢–æ—F–ÄVçG'•7FvSó¢VçG'•7FvS°¢–æ—F–ÄÆVæ6„ÖöFSó¢ÆVæ6„ÖöFRÂçVÆÃ°¢WF†VçF–6FVEW6W#ó¢f÷&vTWF†VçF–6FVEW6W"ÂçVÆÃ°§Ò’°¢6öç7B66÷VçD&6¶VBÒ&ööÆVâ†WF†VçF–6FVEW6W"“°¢6öç7B–FVçF—G”æÖRÒWF†VçF–6FVEW6W#òæF—7Æ”æÖSòçG&–Ò‚’ÇÂ$F†ÆWFR#°¢6öç7BFVfVÇE&öf–ÆS¢f÷&vU&öf–ÆRÒ°¢F—7Æ”æÖS¢–FVçF—G”æÖRÀ¢Væ—G3¢$ÖWG&–2"À¢æ÷F–f–6F–öç3¢G'VRÀ¢Ó°¢6öç7B¶VçG'•7FvRÂ6WDVçG'•7FvUÒÒW6U7FFSÄVçG'•7FvSâ†–æ—F–ÄVçG'•7FvR“°¢6öç7B·67&VVâÂ6WE67&VVåÒÒW6U7FFSÅ67&VVãâ‚%FöF’"“°¢6öç7B¶W†W&6—6W2Â6WDW†W&6—6W2ÂW†W&6—6W5&VG’ÂW†W&6—6W4ÆöDW'&÷"ÂW†W&6—6W57–æ4W'&÷"Â&WG'”W†W&6—6W5ÒÒW6U7F÷&VE7FFR‚&f÷&vRÖW†W&6—6W2"Â–æ—F–ÄW†W&6—6W2Â66÷VçD&6¶VB“°¢6öç7B·v÷&¶÷WE7F'FVBÂ6WEv÷&¶÷WE7F'FVBÂv÷&¶÷WE&VG’Âv÷&¶÷WDÆöDW'&÷"Âv÷&¶÷WE7–æ4W'&÷"Â&WG'•v÷&¶÷WEÒÒW6U7F÷&VE7FFR‚&f÷&vR×v÷&¶÷WBÖÆ—fR"ÂfÇ6RÂ66÷VçD&6¶VB“°¢6öç7B·v÷&¶÷WE7F'FVDBÂ6WEv÷&¶÷WE7F'FVDBÂ7F'FVDE&VG’Â7F'FVDDÆöDW'&÷"Â7F'FVDE7–æ4W'&÷"Â&WG'•7F'FVDEÒÒW6U7F÷&VE7FFR‚&f÷&vR×v÷&¶÷WB×7F'FVBÖB"ÂÂ66÷VçD&6¶VB“°¢6öç7B·&öf–ÆRÂ6WE&öf–ÆRÂ&öf–ÆU&VG’Â&öf–ÆTÆöDW'&÷"Â&öf–ÆU7–æ4W'&÷"Â&WG'•&öf–ÆUÒÒW6U7F÷&VE7FFSÄf÷&vU&öf–ÆSâ‚&f÷&vR×&öf–ÆR"ÂFVfVÇE&öf–ÆRÂ66÷VçD&6¶VB“°¢6öç7B&V6÷&G2ÒW6TGW&&ÆU&V6÷&G2†66÷VçD&6¶VB“°¢6öç7B¶6öÖÖæD÷VâÂ6WD6öÖÖæD÷VåÒÒW6U7FFR†fÇ6R“°¢6öç7B·&öf–ÆT÷VâÂ6WE&öf–ÆT÷VåÒÒW6U7FFR†fÇ6R“°¢6öç7B·Fö7BÂ6WEFö7EÒÒW6U7FFR‚""“°¢6öç7B¶ÆVæ6„ÖöFRÂ6WDÆVæ6„ÖöFUÒÒW6U7FFSÄÆVæ6„ÖöFRÂçVÆÃâ†–æ—F–ÄÆVæ6„ÖöFR“°¢6öç7B¶f–æ—6…7VÖÖ'’Â6WDf–æ—6…7VÖÖ'•ÒÒW6U7FFSÅv÷&¶÷WE7VÖÖ'’ÂçVÆÃâ†çVÆÂ“°¢6öç7B²v÷&¶÷WG3¢v÷&¶÷WD†—7F÷'’ÂÖVÇ2Â‡–G&F–öâÂvFW"ÒÒ&V6÷&G3°¢6öç7B66÷VçE&VG’Ò66÷VçD&6¶VBÇÂ¶W†W&6—6W5&VG’Âv÷&¶÷WE&VG’Â7F'FVDE&VG’Â&öf–ÆU&VG’Â&V6÷&G2ç&VG•ÒæWfW'’„&ööÆVâ“°¢6öç7B66÷VçDÆöD—77VRÒ66÷VçD&6¶V@¢òFöÖ–æçD66÷VçD—77VR…¶W†W&6—6W4ÆöDW'&÷"Âv÷&¶÷WDÆöDW'&÷"Â7F'FVDDÆöDW'&÷"Â&öf–ÆTÆöDW'&÷"Â&V6÷&G2æÆöDW'&÷%Ò¢¢çVÆÃ°¢6öç7B66÷VçE7–æ4—77VRÒ66÷VçD&6¶V@¢òFöÖ–æçD66÷VçD—77VR…¶W†W&6—6W57–æ4W'&÷"Âv÷&¶÷WE7–æ4W'&÷"Â7F'FVDE7–æ4W'&÷"Â&öf–ÆU7–æ4W'&÷"Â&V6÷&G2ç7–æ4W'&÷%Ò¢¢çVÆÃ°¢6öç7BF†ÆWFTæÖRÒ&öf–ÆRæF—7Æ”æÖRçG&–Ò‚’ç7Æ—B‚õÇ2²ò•³ÒÇÂ$F†ÆWFR#°¢6öç7BF†ÆWFT–æ—F–ÂÒF†ÆWFTæÖRç6Æ–6RƒÂ’çFõWW$66R‚“° ¢W6TVffV7B‚‚’Óâ°¢6öç7B6†÷'F7WBÒ†WfVçC¢¶W–&ö&DWfVçB’Óâ°¢–b‚†WfVçBæÖWF¶W’ÇÂWfVçBæ7G&Ä¶W’’bbWfVçBæ¶W’çFôÆ÷vW$66R‚’ÓÓÒ&²"’°¢WfVçBç&WfVçDFVfVÇB‚“°¢6WD6öÖÖæD÷Vâ‚†÷Vâ’Óâ÷Vâ“°¢Ð¢–b†WfVçBæ¶W’ÓÓÒ$W66R"’°¢6WD6öÖÖæD÷Vâ†fÇ6R“°¢6WE&öf–ÆT÷Vâ†fÇ6R“°¢Ð¢Ó°¢v–æF÷ræFDWfVçDÆ—7FVæW"‚&¶W–F÷vâ"Â6†÷'F7WB“°¢&WGW&â‚’Óâv–æF÷rç&VÖ÷fTWfVçDÆ—7FVæW"‚&¶W–F÷vâ"Â6†÷'F7WB“°¢ÒÂµÒ“° ¢W6TVffV7B‚‚’Óâ°¢–b‚Fö7B’&WGW&ã°¢6öç7B–BÒv–æF÷rç6WEF–ÖV÷WB‚‚’Óâ6WEFö7B‚""’Â#C“°¢&WGW&â‚’Óâv–æF÷ræ6ÆV%F–ÖV÷WB†–B“°¢ÒÂ·Fö7EÒ“° ¢W6TVffV7B‚‚’Óâ°¢–b‚ÆVæ6„ÖöFR’&WGW&ã°¢6öç7B&VGV6VDÖ÷F–öâÒv–æF÷ræÖF6„ÖVF–‚"‡&VfW'2×&VGV6VBÖÖ÷F–öã¢&VGV6R’"’æÖF6†W3°¢6öç7B–BÒv–æF÷rç6WEF–ÖV÷WB‚‚’Óâ°¢6WDVçG'•7FvR‚&"“°¢6WDÆVæ6„ÖöFR†çVÆÂ“°¢ÒÂ&VGV6VDÖ÷F–öâò3#¢ÆVæ6„ÖöFRÓÓÒ'&WGW&â"òS¢#S“°¢&WGW&â‚’Óâv–æF÷ræ6ÆV%F–ÖV÷WB†–B“°¢ÒÂ¶ÆVæ6„ÖöFUÒ“° ¢gVæ7F–öâvò†æW‡C¢67&VVâ’°¢6WE67&VVâ†æW‡B“°¢6WD6öÖÖæD÷Vâ†fÇ6R“°¢v–æF÷rç67&öÆÅFò‡²F÷¢Â&V†f–÷#¢'6Öö÷F‚"Ò“°¢Ð ¢gVæ7F–öâ7F'Ev÷&¶÷WB‚’°¢6öç7BÆÅ6WG4f–æ—6†VBÒW†W&6—6W2æWfW'’‚†W†W&6—6R’ÓâW†W&6—6Rç6WG2æWfW'’‚‡6WB’Óâ6WBæFöæR’“°¢–b†ÆÅ6WG4f–æ—6†VB’°¢6WDW†W&6—6W2‚†7W'&VçB’Óâ7W'&VçBæÖ‚†W†W&6—6R’Óâ‡°¢ââæW†W&6—6RÀ¢6WG3¢W†W&6—6Rç6WG2æÖ‚‡6WB’Óâ‡²ââç6WBÂFöæS¢fÇ6RÒ’’À¢Ò’’“°¢Ð¢–b‚v÷&¶÷WE7F'FVBÇÂv÷&¶÷WE7F'FVDB’6WEv÷&¶÷WE7F'FVDB„FFRææ÷r‚’“°¢6WEv÷&¶÷WE7F'FVB‡G'VR“°¢vò‚%G&–â"“°¢6WEFö7B‚%6W76–öâ7F'FVB(	BÖ¶RWfW'’&W6÷VçBâ"“°¢Ð ¢gVæ7F–öâf–æ—6…v÷&¶÷WB‡7VÖÖ'“¢v÷&¶÷WE7VÖÖ'’’°¢&V6÷&G2æFEv÷&¶÷WB‡7VÖÖ'’“°¢6WEv÷&¶÷WE7F'FVB†fÇ6R“°¢6WEv÷&¶÷WE7F'FVDBƒ“°¢6WDf–æ—6…7VÖÖ'’‡7VÖÖ'’“°¢Ð ¢gVæ7F–öâF§W7EvFW"†Ö÷VçDÖÃ¢çVÖ&W"’°¢6öç7B6fTÖ÷VçBÒÖ÷VçDÖÂÂòÔÖF‚æÖ–â„ÖF‚æ'2†Ö÷VçDÖÂ’ÂvFW"’¢Ö÷VçDÖÃ°¢–b‚6fTÖ÷VçB’&WGW&ã°¢&V6÷&G2æFD‡–G&F–öâ‡°¢–C¢7'—Fòç&æFöÕUT”B‚’À¢&V6÷&FVDC¢FFRææ÷r‚’À¢Ö÷VçDÖÃ¢6fTÖ÷VçBÀ¢Ò“°¢6WEFö7B‡6fTÖ÷VçBâòG·6fTÖ÷VçGÒÖÂvFW"ÆövvVBæ¢G´ÖF‚æ'2‡6fTÖ÷VçB—ÒÖÂ&VÖ÷fVBæ“°¢Ð ¢–b†VçG'•7FvRÓÒ&"bbÆVæ6„ÖöFR’°¢&WGW&âÄVçG'”fÆ÷p¢öäVçFW#×²†ÖöFR’Óâ°¢6öç7B&WGW&åFòÒÖöFRÓÓÒ&æWr"ò"ö÷vVÆ6öÖSÖæWr"¢"ö#°¢v–æF÷ræÆö6F–öâæ76–vâ‡&WGW&åFò“°¢×Ð¢–æ—F–Å7FvS×¶VçG'•7FvWÐ¢óã°¢Ð ¢–b‚66÷VçE&VG’’°¢&WGW&âÆF—b6Æ74æÖSÒ&66÷VçBÖÆöF–ær"&öÆSÒ'7FGW2"&–ÖÆ—fSÒ'öÆ—FR#ãÄf÷&vTÖ&–Væ6RFVç6—G“×³GÒóãÇ7G&öæsädõ$tSÂ÷7G&öæsãÇ7ãäÆöF–ær–÷W"66÷VçN(
+cÂ÷7ããÂöF—cã°¢Ð ¢–b†66÷VçDÆöD—77VR’°¢6öç7BÖW76vRÒ66÷VçDÆöD—77VRÓÓÒ'6W76–öâ ¢ò%–÷W"6W76–öâ†2VæFVBâ6–vâ–âv–âFò6öçF–çVRâ ¢¢66÷VçDÆöD—77VRÓÓÒ&66W72 ¢ò%F†—266÷VçB6ææ÷B66W72dõ$tR&–v‡Bæ÷râ ¢¢$dõ$tR6÷VÆBæ÷BÆöB–÷W"66÷VçBâ–÷W"6fVBFF†2æ÷B&VVâ6†ævVBâ#°¢&WGW&âÆF—b6Æ74æÖSÒ&66÷VçBÖÆöF–ær66÷VçBÖW'&÷""&öÆSÒ&ÆW'B#ãÄf÷&vTÖ&–Væ6RFVç6—G“×³ÒóãÇ7G&öæsädõ$tSÂ÷7G&öæsãÇ7ãç¶ÖW76vWÓÂ÷7ããÆ'WGFöâöä6Æ–6³×²‚’Óâ66÷VçDÆöD—77VRÓÓÒ'6W76–öâ"òv–æF÷ræÆö6F–öâæ76–vâ‚"÷6–væ÷WB×v—F‚Ö6†FwC÷&WGW&å÷FóÒS$b"’¢v–æF÷ræÆö6F–öâç&VÆöB‚—Óç¶66÷VçDÆöD—77VRÓÓÒ'6W76–öâ"ò%6–vâ–âv–â"¢%G'’v–â'ÓÂö'WGFöããÂöF—cã°¢Ð ¢&WGW&â€¢Ãà¢ÆF—b6Æ74æÖS×¶×6†VÆÂG¶ÆVæ6„ÖöFRò"6–æVÖF–2×VæFW&Æ’"¢"'ÖÓà¢Äf÷&vTÖ&–Væ6RFVç6—G“×·67&VVâÓÓÒ%FöF’"ò#B¢gÒóà¢Æ†VFW"6Æ74æÖSÒ'F÷&"#à¢Æ'WGFöâ6Æ74æÖSÒ'v÷&FÖ&²"öä6Æ–6³×²‚’Óâvò‚%FöF’"—Ò&–ÖÆ&VÃÒ$f÷&vR†öÖR#à¢Ç7G&öæsädõ$tSÂ÷7G&öæsà¢Âö'WGFöãà¢Ææb6Æ74æÖSÒ&FW6·F÷Öæb"&–ÖÆ&VÃÒ%&–Ö'’æf–vF–öâ#à¢¶æbæÖ‚†—FVÒ’ÓâÆ'WGFöâ¶W“×¶—FVÒææÖWÒ&–Ö7W'&VçC×·67&VVâÓÓÒ—FVÒææÖRò'vR"¢VæFVf–æVGÒ6Æ74æÖS×·67&VVâÓÓÒ—FVÒææÖRò&7F—fR"¢"'Òöä6Æ–6³×²‚’Óâvò†—FVÒææÖR—ÓãÄf÷&vT–6öâæÖS×¶—FVÒæ–6öçÒóãÇ7ãç¶—FVÒææÖWÓÂ÷7ããÂö'WGFöãâ—Ð¢Âöæcà¢ÆF—b6Æ74æÖSÒ'F÷Ö7F–öç2#à¢Æ'WGFöâ6Æ74æÖSÒ'V–6²Ö6öÖÖæB"öä6Æ–6³×²‚’Óâ6WD6öÖÖæD÷Vâ‡G'VR—Ò&–ÖÆ&VÃÒ$÷VâV–6²7F–öç2#ãÄf÷&vT–6öâæÖSÒ'ÇW2"óãÇ7ãåV–6³Â÷7ããÂö'WGFöãà¢Æ'WGFöâ6Æ74æÖSÒ&fF""öä6Æ–6³×²‚’Óâ6WE&öf–ÆT÷Vâ‡G'VR—Ò&–ÖÆ&VÃÒ$÷Vâ&öf–ÆR#ç¶F†ÆWFT–æ—F–ÇÓÂö'WGFöãà¢ÂöF—cà¢Âö†VFW#à ¢ÆÖ–â6Æ74æÖSÒ'v÷&·76R#à¢·67&VVâÓÓÒ%FöF’"bbÅFöF’F†ÆWFTæÖS×¶F†ÆWFTæÖWÒW†W&6—6W3×¶W†W&6—6W7ÒÖVÇ3×¶ÖVÇ7ÒvFW#×·vFW'Òv÷&¶÷WE7F'FVC×·v÷&¶÷WE7F'FVGÒÆ7Ev÷&¶÷WC×·v÷&¶÷WD†—7F÷'•³×Òöå7F'C×·7F'Ev÷&¶÷WGÒöä6ö6ƒ×²‚’Óâvò‚$6ö6‚"—Òöå&öw&W73×²‚’Óâvò‚%&öw&W72"—ÒóçÐ¢·67&VVâÓÓÒ%G&–â"bbÅG&–âW†W&6—6W3×¶W†W&6—6W7Ò6WDW†W&6—6W3×·6WDW†W&6—6W7Ò7F'FVC×·v÷&¶÷WE7F'FVGÒ6WE7F'FVC×·6WEv÷&¶÷WE7F'FVGÒ7F'FVDC×·v÷&¶÷WE7F'FVDGÒ6WE7F'FVDC×·6WEv÷&¶÷WE7F'FVDGÒöäf–æ—6ƒ×¶f–æ—6…v÷&¶÷WGÒæ÷F–g“×·6WEFö7GÒóçÐ¢·67&VVâÓÓÒ$gVVÂ"bbÄgVVÀ¢ÖVÇ3×¶ÖVÇ7Ð¢‡–G&F–öã×¶‡–G&F–öçÐ¢vFW#×·vFW'Ð¢öäFDÖVÃ×·&V6÷&G2æFDÖVÇÐ¢öåWFFTÖVÃ×²†ÖVÂ’Óâ&V6÷&G2çWFFU&V6÷&B‚&ÖVÂ"ÂÖVÂ—Ð¢öå&VÖ÷fTÖVÃ×²†–B’Óâ&V6÷&G2ç&VÖ÷fU&V6÷&B‚&ÖVÂ"Â–B—Ð¢öåWFFT‡–G&F–öã×²†VçG'’’Óâ&V6÷&G2çWFFU&V6÷&B‚&‡–G&F–öâ"ÂVçG'’—Ð¢öå&VÖ÷fT‡–G&F–öã×²†–B’Óâ&V6÷&G2ç&VÖ÷fU&V6÷&B‚&‡–G&F–öâ"Â–B—Ð¢öäF§W7EvFW#×¶F§W7EvFW'Ð¢æ÷F–g“×·6WEFö7GÐ¢óçÐ¢·67&VVâÓÓÒ$6ö6‚"bbÄ6ö6‚W†W&6—6W3×¶W†W&6—6W7ÒÖVÇ3×¶ÖVÇ7ÒóçÐ¢·67&VVâÓÓÒ%&öw&W72"bbÅ&öw&W70¢W†W&6—6W3×¶W†W&6—6W7Ð¢†—7F÷'“×·v÷&¶÷WD†—7F÷'—Ð¢v÷&¶÷WE7F'FVC×·v÷&¶÷WE7F'FVGÐ¢öåG&–ã×²‚’Óâvò‚%G&–â"—Ð¢öåWFFUv÷&¶÷WC×²‡v÷&¶÷WB’Óâ&V6÷&G2çWFFU&V6÷&B‚'v÷&¶÷WB"Âv÷&¶÷WB—Ð¢öäFVÆWFUv÷&¶÷WC×²†–B’Óâ&V6÷&G2ç&VÖ÷fU&V6÷&B‚'v÷&¶÷WB"Â–B—Ð¢óçÐ¢ÂöÖ–ãà ¢Ææb6Æ74æÖSÒ&Öö&–ÆRÖFö6²"&–ÖÆ&VÃÒ$Öö&–ÆRæf–vF–öâ#à¢¶æbæÖ‚†—FVÒ’ÓâÆ'WGFöâ¶W“×¶—FVÒææÖWÒ&–Ö7W'&VçC×·67&VVâÓÓÒ—FVÒææÖRò'vR"¢VæFVf–æVGÒ6Æ74æÖS×·67&VVâÓÓÒ—FVÒææÖRò&7F—fR"¢"'Òöä6Æ–6³×²‚’Óâvò†—FVÒææÖR—ÓãÆ“ãÄf÷&vT–6öâæÖS×¶—FVÒæ–6öçÒóãÂö“ãÇ7ãç¶—FVÒææÖWÓÂ÷7ããÂö'WGFöãâ—Ð¢Âöæcà ¢¶6öÖÖæD÷VâbbÄ6öÖÖæEÆWGFRöä6Æ÷6S×²‚’Óâ6WD6öÖÖæD÷Vâ†fÇ6R—Òvó×¶v÷Ò7F'Ev÷&¶÷WC×·7F'Ev÷&¶÷WGÒFEvFW#×²‚’Óâ²F§W7EvFW"ƒ#S“²6WD6öÖÖæD÷Vâ†fÇ6R“²×ÒóçÐ¢·&öf–ÆT÷VâbbÅ&öf–ÆTG&vW ¢&öf–ÆSÞ;ã»h‘éì¶»§q«^uÑ•€ü€‘í‘½¹”¹±•¹Ñ¡ô½˜€‘í…±±M•ÑÌ¹±•¹Ñ¡ôÍ•ÑÌ±½•ƒ
+Ü€‘íÙ½±Õµ”¹Ñ½1½…±•MÑÉ¥¹œ ¥ô­€€è€‘í…±±M•ÑÌ¹±•¹Ñ¡ôÝ½É­¥¹œÍ•ÑÌƒ
+Ü¡½½Í”„½µ™½ÉÑ…‰±”±½…‰•™½É”•… µ½Ù•µ•¹Ñôð½ÍÁ…¸øð½‘¥Øø(€€€€€€€€€€€€ñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰ÁÉ¥µ…Éäµ…Ñ¥½¸ˆ½¹±¥¬õí‰•¥¹M•ÍÍ¥½¹ôùíÍÑ…ÉÑ•€ü1¥Ù”ƒ
+Ü€‘í•±…ÁÍ•‘õ€€è€‰	•¥¸Í•ÍÍ¥½¸‰ô€ñÍÁ…¸ûŠHð½ÍÁ…¸øð½‰ÕÑÑ½¸ø(€€€€€€€€€€ð½‘¥Øø(€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰•á•É¥Í”µ…½É‘¥½¸ˆø(€€€€€€€€€€€í•á•É¥Í•Ì¹µ…À ¡•á•É¥Í”°•á•É¥Í•%¹‘•à¤€ôøì(€€€€€€€€€€€€€½¹ÍÐ½Á•¸€ô•áÁ…¹‘•€ôôô•á•É¥Í”¹¥ì(€€€€€€€€€€€€€½¹ÍÐ½µÁ±•Ñ•€ô•á•É¥Í”¹Í•ÑÌ¹™¥±Ñ•È ¡Í•Ð¤€ôøÍ•Ð¹‘½¹”¤¹±•¹Ñ ì(€€€€€€€€€€€€€É•ÑÕÉ¸€ñ…ÉÑ¥±”±…ÍÍ9…µ”õí•á•É¥Í”µ‰±½¬€‘í½Á•¸€ü€‰½Á•¸ˆ€è€ˆ‰õô­•äõí•á•É¥Í”¹¥‘ôø(€€€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰•á•É¥Í”µÍÕµµ…Éäˆ…É¥„µ•áÁ…¹‘•õí½Á•¹ô…É¥„µ½¹ÑÉ½±Ìõí•á•É¥Í”´‘í•á•É¥Í”¹¥‘ôµÍ•ÑÍô½¹±¥¬õì ¤€ôøÍ•ÑáÁ…¹‘•¡½Á•¸€ü€ˆˆ€è•á•É¥Í”¹¥¥ôø(€€€€€€€€€€€€€€€€€€ñÍÁ…¸±…ÍÍ9…µ”ô‰•á•É¥Í”µ¹Õµ‰•ÈˆøÁí•á•É¥Í•%¹‘•à€¬€Åôð½ÍÁ…¸ø(€€€€€€€€€€€€€€€€€€ñÀøñÍµ…±°ùí•á•É¥Í”¹Ñ…É•Ñôð½Íµ…±°øñÍÑÉ½¹œùí•á•É¥Í”¹¹…µ•ôð½ÍÑÉ½¹œøñÍÁ…¸ùí•á•É¥Í”¹Õ•ôð½ÍÁ…¸øð½Àø(€€€€€€€€€€€€€€€€€€ñˆùí½µÁ±•Ñ•‘ô½í•á•É¥Í”¹Í•ÑÌ¹±•¹Ñ¡ôð½ˆøñ¤ûŠ2ð½¤ø(€€€€€€€€€€€€€€€€ð½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€€€í½Á•¸€˜˜€ñ‘¥Ø±…ÍÍ9…µ”ô‰Í•Ðµ•‘¥Ñ½Èˆ¥õí•á•É¥Í”´‘í•á•É¥Í”¹¥‘ôµÍ•ÑÍôø(€€€€€€€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰Í•Ðµ¡•…ˆøñÍÁ…¸ùMPð½ÍÁ…¸øñÍÁ…¸ù-ð½ÍÁ…¸øñÍÁ…¸ùIALð½ÍÁ…¸øñÍÁ…¸ùI%Hð½ÍÁ…¸øñÍÁ…¸ùMQQULð½ÍÁ…¸øð½‘¥Øø(€€€€€€€€€€€€€€€€€€ñÀ±…ÍÍ9…µ”ô‰™¥•±µ¡•±Àˆ¥õí•á•É¥Í”´‘í•á•É¥Í”¹¥‘ôµÉ¥Èµ¡•±ÁôùI%Hµ•…¹ÌÑ¡”±•…¸É•ÁÌå½Ô½Õ±ÍÑ¥±°‘¼¸MÑ½À¥˜„µ½Ù•µ•¹Ð¡ÕÉÑÌ¸ð½Àø(€€€€€€€€€€€€€€€€€í•á•É¥Í”¹Í•ÑÌ¹µ…À ¡Í•Ð°Í•Ñ%¹‘•à¤€ôø€ñ‘¥Ø±…ÍÍ9…µ”õíÍ•ÐµÉ½Ü€‘íÍ•Ð¹‘½¹”€ü€‰‘½¹”ˆ€è€ˆ‰õô­•äõíÍ•Ñ%¹‘•áôø(€€€€€€€€€€€€€€€€€€€€ñÍÁ…¸ùíÍ•Ñ%¹‘•à€¬€Åôð½ÍÁ…¸ø(€€€€€€€€€€€€€€€€€€€€ñM•Ñ%¹ÁÕÐ±…‰•°õí]•¥¡Ð™½ÈÍ•Ð€‘íÍ•Ñ%¹‘•à€¬€ÅõôÕ¹¥Ðô‰­œˆÙ…±Õ”õíÍ•Ð¹­ôµ¥¸õìÁô½¹¡…¹”õì¡Ù…±Õ”¤€ôøÕÁ‘…Ñ•M•Ð¡•á•É¥Í”¹¥°Í•Ñ%¹‘•à°€‰­œˆ°Ù…±Õ”¥ô€¼ø(€€€€€€€€€€€€€€€€€€€€ñM•Ñ%¹ÁÕÐ±…‰•°õíI•ÁÌ™½ÈÍ•Ð€‘íÍ•Ñ%¹‘•à€¬€ÅõôÕ¹¥Ðô‰É•ÁÌˆÙ…±Õ”õíÍ•Ð¹É•ÁÍôµ¥¸õìÅô½¹¡…¹”õì¡Ù…±Õ”¤€ôøÕÁ‘…Ñ•M•Ð¡•á•É¥Í”¹¥°Í•Ñ%¹‘•à°€‰É•ÁÌˆ°Ù…±Õ”¥ô€¼ø(€€€€€€€€€€€€€€€€€€€€ñ±…‰•°±…ÍÍ9…µ”ô‰É¥Èµ¥¹ÁÕÐˆø(€€€€€€€€€€€€€€€€€€€€€€ñÍ•±•Ð…É¥„µ±…‰•°õíI•ÁÌ¥¸É•Í•ÉÙ”™½ÈÍ•Ð€‘íÍ•Ñ%¹‘•à€¬€Åõô…É¥„µ‘•ÍÉ¥‰•‘‰äõí•á•É¥Í”´‘í•á•É¥Í”¹¥‘ôµÉ¥Èµ¡•±ÁôÙ…±Õ”õíÍ•Ð¹É¥È€üü€Éô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÕÁ‘…Ñ•M•Ð¡•á•É¥Í”¹¥°Í•Ñ%¹‘•à°€‰É¥Èˆ°9Õµ‰•È¡•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”¤¥ôø(€€€€€€€€€€€€€€€€€€€€€€€ílÀ°Ä°È°Ì°Ð°Õt¹µ…À ¡Ù…±Õ”¤€ôø€ñ½ÁÑ¥½¸Ù…±Õ”õíÙ…±Õ•ô­•äõíÙ…±Õ•ôùíÙ…±Õ•ôð½½ÁÑ¥½¸ø¥ô(€€€€€€€€€€€€€€€€€€€€€€ð½Í•±•Ðø(€€€€€€€€€€€€€€€€€€€€€€ñÍÁ…¸ùI%Hð½ÍÁ…¸ø(€€€€€€€€€€€€€€€€€€€€ð½±…‰•°ø(€€€€€€€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰Í•Ðµ±½œµ‰ÕÑÑ½¸ˆ½¹±¥¬õì ¤€ôø½µÁ±•Ñ•M•Ð¡•á•É¥Í”¹¥°Í•Ñ%¹‘•à¥ôùíÍ•Ð¹‘½¹”€ü€‹ŠrL1½•ˆ€è€‰1½œÍ•Ð‰ôð½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€€€€€€ð½‘¥Øø¥ô(€€€€€€€€€€€€€€€€ð½‘¥Øùô(€€€€€€€€€€€€€€ð½…ÉÑ¥±”øì(€€€€€€€€€€€ô¥ô(€€€€€€€€€€ð½‘¥Øø(€€€€€€€€€íÍÑ…ÉÑ•€˜˜‘½¹”¹±•¹Ñ €ôôô…±±M•ÑÌ¹±•¹Ñ €˜˜€ñ‘¥Ø±…ÍÍ9…µ”ô‰Í•ÍÍ¥½¸µ™¥¹¥Í µ‰…Èˆø(€€€€€€€€€€€€ñÀøñÍÁ…¸ù]½É­½ÕÐ½µÁ±•Ñ”ð½ÍÁ…¸øñÍÑÉ½¹œù±°í…±±M•ÑÌ¹±•¹Ñ¡ôÝ½É­¥¹œÍ•ÑÌ±½•ð½ÍÑÉ½¹œøð½Àø(€€€€€€€€€€€€ñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰™¥¹¥Í µ…Ñ¥½¸ˆ½¹±¥¬õí™¥¹¥Í¡M•ÍÍ¥½¹ôù¥¹¥Í €˜Í…Ù”€ñÍÁ…¸ûŠHð½ÍÁ…¸øð½‰ÕÑÑ½¸ø(€€€€€€€€€€ð½‘¥Øùô(€€€€€€€€ð½Í•Ñ¥½¸ø(€€€€€€€€ñ…Í¥‘”±…ÍÍ9…µ”ô‰Í•ÍÍ¥½¸µÉ…¥°ˆø(€€€€€€€€€€ñÀ±…ÍÍ9…µ”ô‰•å•‰É½Üˆù]½É­½ÕÐÍÑ…ÑÕÌð½Àø(€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰ÁÉ½É•ÍÌµ½É‰¥ÐˆÉ½±”ô‰ÁÉ½É•ÍÍ‰…Èˆ…É¥„µ±…‰•°ô‰]½É­½ÕÐÁÉ½É•ÍÌˆ…É¥„µÙ…±Õ•µ¥¸õìÁô…É¥„µÙ…±Õ•µ…àõìÄÀÁô…É¥„µÙ…±Õ•¹½ÜõíÁÉ½É•ÍÍôÍÑå±”õíì€ˆ´µÁÉ½É•ÍÌˆè€‘íÁÉ½É•ÍÌ€¨€Ì¸Ùõ‘•€ô…ÌI•…Ð¹MMAÉ½Á•ÉÑ¥•ÍôøñÍÁ…¸øñÍÑÉ½¹œùíÁÉ½É•ÍÍô”ð½ÍÑÉ½¹œøñÍµ…±°ù½µÁ±•Ñ”ð½Íµ…±°øð½ÍÁ…¸øð½‘¥Øø(€€€€€€€€€€ñ‘°øñ‘¥Øøñ‘Ðù]½É­¥¹œÍ•ÑÌð½‘Ðøñ‘ùí‘½¹”¹±•¹Ñ¡ô€¼í…±±M•ÑÌ¹±•¹Ñ¡ôð½‘øð½‘¥Øøñ‘¥Øøñ‘ÐùY½±Õµ”ð½‘Ðøñ‘ùíÙ½±Õµ”¹Ñ½1½…±•MÑÉ¥¹œ ¥ô­œð½‘øð½‘¥Øøñ‘¥Øøñ‘Ðù±…ÁÍ•ð½‘Ðøñ‘ùí•±…ÁÍ•‘ôð½‘øð½‘¥Øøð½‘°ø(€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”õíÉ•ÍÐµ…É‘íÉ•ÍÑI•µ…¥¹¥¹œ€ü€ˆ…Ñ¥Ù”ˆ€è€ˆ‰õôø(€€€€€€€€€€€€ñÍÁ…¸ùíÉ•ÍÑI•µ…¥¹¥¹œ€ü€‰IMQ%9ˆ€è€‰IMPQ%5H‰ôð½ÍÁ…¸ø(€€€€€€€€€€€€ñÍÑÉ½¹œùí™½Éµ…Ñ±½¬¡É•ÍÑI•µ…¥¹¥¹œñð€ÄÈÀ¥ôð½ÍÑÉ½¹œø(€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰É•ÍÐµ…Ñ¥½¹Ìˆø(€€€€€€€€€€€€€íÉ•ÍÑI•µ…¥¹¥¹œ(€€€€€€€€€€€€€€€€ü€ðøñ‰ÕÑÑ½¸½¹±¥¬õì ¤€ôøÍ•ÑI•ÍÑ¹‘Ð¡É•ÍÑ¹‘Ð€¬€ÌÀÀÀÀ¥ôø¬ÌÀÍ•Œð½‰ÕÑÑ½¸øñ‰ÕÑÑ½¸½¹±¥¬õì ¤€ôøÍ•ÑI•ÍÑ¹‘Ð À¥ôùM­¥ÀÉ•ÍÐð½‰ÕÑÑ½¸øð¼ø(€€€€€€€€€€€€€€€€è€ñ‰ÕÑÑ½¸½¹±¥¬õì ¤€ôøÍ•ÑI•ÍÑ¹‘Ð¡…Ñ”¹¹½Ü ¤€¬€ÄÈÀÀÀÀ¥ôùMÑ…ÉÐ€ÈèÀÀð½‰ÕÑÑ½¸ùô(€€€€€€€€€€€€ð½‘¥Øø(€€€€€€€€€€ð½‘¥Øø(€€€€€€€€€€ñ‘•Ñ…¥±Ì±…ÍÍ9…µ”ô‰Í•ÍÍ¥½¸µ¹½Ñ”ˆ½Á•¸õí¹½Ñ•=Á•¹ô½¹Q½±”õì¡•Ù•¹Ð¤€ôøÍ•Ñ9½Ñ•=Á•¸¡•Ù•¹Ð¹ÕÉÉ•¹ÑQ…É•Ð¹½Á•¸¥ôø(€€€€€€€€€€€€ñÍÕµµ…ÉäùíÍ•ÍÍ¥½¹9½Ñ”€ü€‰‘¥ÐÍ•ÍÍ¥½¸¹½Ñ”ˆ€è€ˆ¬‘Í•ÍÍ¥½¸¹½Ñ”‰ôð½ÍÕµµ…Éäø(€€€€€€€€€€€€ñÑ•áÑ…É•„…É¥„µ±…‰•°ô‰M•ÍÍ¥½¸¹½Ñ”ˆÙ…±Õ”õíÍ•ÍÍ¥½¹9½Ñ•ô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÍ•ÑM•ÍÍ¥½¹9½Ñ”¡•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”¥ôÁ±…•¡½±‘•Èô‰Q•¡¹¥ÅÕ”°Á…¥¸°•¹•Éä°¹•áÐ…‘©ÕÍÑµ•¹ÓŠ˜ˆ€¼ø(€€€€€€€€€€ð½‘•Ñ…¥±Ìø(€€€€€€€€€€ñÀ±…ÍÍ9…µ”ô‰½… µ¹½Ñ”ˆøñˆûŠr˜ð½ˆøñÍÁ…¸ù-••ÀÑÝ¼±•…¸É•ÁÌ¥¸É•Í•ÉÙ”Õ¹Ñ¥°Ñ¡”™¥¹…°Ý½É­¥¹œÍ•Ð¸ð½ÍÁ…¸øð½Àø(€€€€€€€€€íÍÑ…ÉÑ•€˜˜‘½¹”¹±•¹Ñ €ø€À€˜˜‘½¹”¹±•¹Ñ €ð…±±M•ÑÌ¹±•¹Ñ €˜˜€ñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰•¹µÍ•ÍÍ¥½¸µ±¥¹¬ˆ½¹±¥¬õí™¥¹¥Í¡M•ÍÍ¥½¹ôù¹Í•ÍÍ¥½¸Ý¥Ñ í‘½¹”¹±•¹Ñ¡ô±½•Í•ÑÌð½‰ÕÑÑ½¸ùô(€€€€€€€€ð½…Í¥‘”ø(€€€€€€ð½‘¥Øùô((€€€€€íÙ¥•Ü€ôôô€‰]••¬ˆ€˜˜€ñÍ•Ñ¥½¸¥ô‰ÑÉ…¥¸µÁ…¹•°µÝ••¬ˆ±…ÍÍ9…µ”ô‰Ý••¬µ‰½…ÉˆÉ½±”ô‰Ñ…‰Á…¹•°ˆ…É¥„µ±…‰•±±•‘‰äô‰ÑÉ…¥¸µÑ…ˆµÝ••¬ˆø(€€€€€€€€ñ¡•…‘•Èøñ‘¥ØøñÀ±…ÍÍ9…µ”ô‰•å•‰É½ÜˆùA±…¹¹¥¹œÁÉ•Ù¥•Üð½Àøñ Èùá…µÁ±”ÑÉ…¥¹¥¹œÝ••¬ð½ ÈøñÍÁ…¸±…ÍÍ9…µ”ô‰¡½¹•ÍÑäµ¹½Ñ”ˆùQ¡¥ÌÍ¡•‘Õ±”¥Ì¥±±ÕÍÑÉ…Ñ¥Ù”Õ¹Ñ¥°Ý••­±äÁ±…¹¹¥¹œ¥Ì½¹¹•Ñ•Ñ¼å½ÕÈ…½Õ¹Ð¸ð½ÍÁ…¸øð½‘¥Øøñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰½ÕÑ±¥¹”µ…Ñ¥½¸ˆ½¹±¥¬õì ¤€ôøÍ•ÑY¥•Ü ‰M•ÍÍ¥½¸ˆ¥ôù=Á•¸Ñ½‘…ä™…Á½ÌíÌÝ½É­½ÕÐð½‰ÕÑÑ½¸øð½¡•…‘•Èø(€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰Ý••¬µÁ±…¸ˆùíÝ••­A±…¸¹µ…À ¡‘…ä¤€ôø€ñ…ÉÑ¥±”±…ÍÍ9…µ”õí‘…ä¹ÍÑ…ÑÕÍô­•äõí‘…ä¹‘…åôøñ‘¥ØøñÍÁ…¸ùí‘…ä¹‘…åôð½ÍÁ…¸øñÍÑÉ½¹œùí‘…ä¹‘…Ñ•ôð½ÍÑÉ½¹œøð½‘¥ØøñÀøñÍµ…±°ùí‘…ä¹ÍÑ…ÑÕÌ€ôôô€‰É•ÍÐˆ€ü€‰I•½Ù•Éäˆ€è€‰QÉ…¥¹¥¹œ‰ôð½Íµ…±°øñÍÑÉ½¹œùí‘…ä¹Ñ¥Ñ±•ôð½ÍÑÉ½¹œøñÍÁ…¸ùí‘…ä¹™½ÕÍôð½ÍÁ…¸øð½Àøñˆùí‘…ä¹‘ÕÉ…Ñ¥½¹ôð½ˆøð½…ÉÑ¥±”ø¥ôð½‘¥Øø(€€€€€€€€ñÀ±…ÍÍ9…µ”ô‰ÁÉ½É…´µ¹½Ñ”ˆøñÍÁ…¸ù¤ð½ÍÁ…¸øñˆùM…™•Ñä¹½Ñ”ð½ˆøA…¥¸°ÍÝ•±±¥¹œ½È±½ÍÌ½˜¹½Éµ…°µ½Ù•µ•¹ÐÍ¡½Õ±¡…¹”Ñ¡”Á±…¸¸=I‘½•Ì¹½ÐÉ•Á±…”µ•‘¥…°…É”¸ð½Àø(€€€€€€ð½Í•Ñ¥½¸ùô((€€€€€íÙ¥•Ü€ôôô€‰1¥‰É…Éäˆ€˜˜€ñÍ•Ñ¥½¸¥ô‰ÑÉ…¥¸µÁ…¹•°µ±¥‰É…Éäˆ±…ÍÍ9…µ”ô‰±¥‰É…ÉäµÙ¥•ÜˆÉ½±”ô‰Ñ…‰Á…¹•°ˆ…É¥„µ±…‰•±±•‘‰äô‰ÑÉ…¥¸µÑ…ˆµ±¥‰É…Éäˆø(€€€€€€€€ñ¡•…‘•Èøñ‘¥ØøñÀ±…ÍÍ9…µ”ô‰•å•‰É½Üˆùá•É¥Í”±¥‰É…Éäð½Àøñ Èù¥¹„µ½Ù•µ•¹Ð¸ð½ Èøð½‘¥Øøñ±…‰•°±…ÍÍ9…µ”ô‰±¥‰É…ÉäµÍ•…É ˆøñÍÁ…¸ûŠ2Tð½ÍÁ…¸øñ¥¹ÁÕÐ…É¥„µ±…‰•°ô‰M•…É •á•É¥Í•ÌˆÙ…±Õ”õí±¥‰É…ÉåEÕ•Éåô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÍ•Ñ1¥‰É…ÉåEÕ•Éä¡•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”¥ôÁ±…•¡½±‘•Èô‰M•…É µ½Ù•µ•¹Ð½ÈµÕÍ±—Š˜ˆ€¼øð½±…‰•°øð½¡•…‘•Èø(€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰±¥‰É…ÉäµÉ¥ˆùíÙ¥Í¥‰±•1¥‰É…Éä¹µ…À ¡µ½Ù”¤€ôøì(€€€€€€€€€½¹ÍÐ¥¹A±…¸€ô•á•É¥Í•Ì¹Í½µ” ¡•á•É¥Í”¤€ôø•á•É¥Í”¹¹…µ”€ôôôµ½Ù”¹¹…µ”¤ì(€€€€€€€€€É•ÑÕÉ¸€ñ…ÉÑ¥±”­•äõíµ½Ù”¹¹…µ•ôøñÍÁ…¸ùíµ½Ù”¹Ñ…É•Ñôð½ÍÁ…¸øñ Ìùíµ½Ù”¹¹…µ•ôð½ ÌøñÀùíµ½Ù”¹É½±•ôð½Àøñˆùíµ½Ù”¹Õ•ôð½ˆøñ‰ÕÑÑ½¸…É¥„µ±…‰•°õí€‘í¥¹A±…¸€ü€‰=Á•¸ˆ€è€‰‘‰ô€‘íµ½Ù”¹¹…µ•õô½¹±¥¬õì ¤€ôøÍ•±•Ñ1¥‰É…Éå5½Ù”¡µ½Ù”¥ôùí¥¹A±…¸€ü€‰=Á•¸ˆ€è€‰‘‰ôð½‰ÕÑÑ½¸øð½…ÉÑ¥±”øì(€€€€€€€ô¥ôð½‘¥Øø(€€€€€€€ì…Ù¥Í¥‰±•1¥‰É…Éä¹±•¹Ñ €˜˜€ñ‘¥Ø±…ÍÍ9…µ”ô‰±¥‰É…Éäµ•µÁÑäˆøñÍÑÉ½¹œù9¼µ½Ù•µ•¹Ð™½Õ¹¸ð½ÍÑÉ½¹œøñÍÁ…¸ùQÉä„µÕÍ±”É½ÕÀÍÕ …Ì¡•ÍÐ°‰…¬°½ÈÍ¡½Õ±‘•ÉÌ¸ð½ÍÁ…¸øð½‘¥Øùô(€€€€€€ð½Í•Ñ¥½¸ùô(€€€€ð½‘¥Øø(€€¤ì)ô()™Õ¹Ñ¥½¸M•Ñ%¹ÁÕÐ¡ì±…‰•°°Õ¹¥Ð°Ù…±Õ”°µ¥¸°½¹¡…¹”ôèì±…‰•°èÍÑÉ¥¹œìÕ¹¥ÐèÍÑÉ¥¹œìÙ…±Õ”è¹Õµ‰•Èìµ¥¸è¹Õµ‰•Èì½¹¡…¹”è€¡Ù…±Õ”è¹Õµ‰•È¤€ôøÙ½¥ô¤ì(€É•ÑÕÉ¸€ (€€€€ñ±…‰•°±…ÍÍ9…µ”ô‰Í•Ðµ¥¹ÁÕÐˆø(€€€€€€ñ¥¹ÁÕÐ(€€€€€€€ÑåÁ”ô‰¹Õµ‰•Èˆ(€€€€€€€¥¹ÁÕÑ5½‘”ô‰‘•¥µ…°ˆ(€€€€€€€…É¥„µ±…‰•°õí±…‰•±ô(€€€€€€€µ¥¸õíµ¥¹ô(€€€€€€€ÍÑ•ÀôˆÄˆ(€€€€€€€Ù…±Õ”õíÙ…±Õ•ô(€€€€€€€½¹¡…¹”õì¡•Ù•¹Ð¤€ôø½¹¡…¹”¡5…Ñ ¹µ…à¡µ¥¸°9Õµ‰•È¡•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”¤¤¥ô(€€€€€€¼ø(€€€€€€ñÍÁ…¸ùíÕ¹¥Ñôð½ÍÁ…¸ø(€€€€ð½±…‰•°ø(€€¤ì)ô()™Õ¹Ñ¥½¸Õ•°¡ì(€µ•…±Ì°(€¡å‘É…Ñ¥½¸°(€Ý…Ñ•È°(€½¹‘‘5•…°°(€½¹UÁ‘…Ñ•5•…°°(€½¹I•µ½Ù•5•…°°(€½¹UÁ‘…Ñ•!å‘É…Ñ¥½¸°(€½¹I•µ½Ù•!å‘É…Ñ¥½¸°(€½¹‘©ÕÍÑ]…Ñ•È°(€¹½Ñ¥™ä°)ôèì(€µ•…±Ìè5•…±mtì(€¡å‘É…Ñ¥½¸è!å‘É…Ñ¥½¹¹ÑÉåmtì(€Ý…Ñ•Èè¹Õµ‰•Èì(€½¹‘‘5•…°è€¡µ•…°è5•…°¤€ôøÙ½¥ì(€½¹UÁ‘…Ñ•5•…°è€¡µ•…°è5•…°¤€ôøÙ½¥ì(€½¹I•µ½Ù•5•…°è€¡¥èÍÑÉ¥¹œ¤€ôøÙ½¥ì(€½¹UÁ‘…Ñ•!å‘É…Ñ¥½¸è€¡•¹ÑÉäè!å‘É…Ñ¥½¹¹ÑÉä¤€ôøÙ½¥ì(€½¹I•µ½Ù•!å‘É…Ñ¥½¸è€¡¥èÍÑÉ¥¹œ¤€ôøÙ½¥ì(€½¹‘©ÕÍÑ]…Ñ•Èè€¡…µ½Õ¹Ñ5°è¹Õµ‰•È¤€ôøÙ½¥ì(€¹½Ñ¥™äè€¡µ•ÍÍ…”èÍÑÉ¥¹œ¤€ôøÙ½¥ì)ô¤ì(€½¹ÍÐmµ•…±=Á•¸°Í•Ñ5•…±=Á•¹t€ôÕÍ•MÑ…Ñ”¡™…±Í”¤ì(€½¹ÍÐm•‘¥Ñ¥¹5•…°°Í•Ñ‘¥Ñ¥¹5•…±t€ôÕÍ•MÑ…Ñ”ñ5•…°ð¹Õ±°ø¡¹Õ±°¤ì(€½¹ÍÐm•‘¥Ñ¥¹!å‘É…Ñ¥½¸°Í•Ñ‘¥Ñ¥¹!å‘É…Ñ¥½¹t€ôÕÍ•MÑ…Ñ”ñ!å‘É…Ñ¥½¹¹ÑÉäð¹Õ±°ø¡¹Õ±°¤ì(€½¹ÍÐ…±½É¥•Ì€ôµ•…±Ì¹É•‘Õ” ¡Ñ½Ñ…°°µ•…°¤€ôøÑ½Ñ…°€¬µ•…°¹­…°°€À¤ì(€½¹ÍÐÁÉ½Ñ•¥¸€ôµ•…±Ì¹É•‘Õ” ¡Ñ½Ñ…°°µ•…°¤€ôøÑ½Ñ…°€¬µ•…°¹ÁÉ½Ñ•¥¸°€À¤ì(€½¹ÍÐ…±½É¥•Q…É•Ð€ô€ÈÌàÀì(€½¹ÍÐÁÉ½Ñ•¥¹Q…É•Ð€ô€ÄäÀì(€½¹ÍÐ…±½É¥•AÉ½É•ÍÌ€ô5…Ñ ¹µ¥¸ ÄÀÀ°5…Ñ ¹É½Õ¹¡…±½É¥•Ì€¼…±½É¥•Q…É•Ð€¨€ÄÀÀ¤¤ì(€½¹ÍÐÝ…Ñ•ÉAÉ½É•ÍÌ€ô5…Ñ ¹µ¥¸ ÄÀÀ°5…Ñ ¹É½Õ¹¡Ý…Ñ•È€¼€ÌÈÀÀ€¨€ÄÀÀ¤¤ì(€½¹ÍÐ¹•áÑ]…Ñ•É¡•­Á½¥¹Ð€ô5…Ñ ¹µ¥¸ ÌÈÀÀ°5…Ñ ¹•¥° ¡Ý…Ñ•È€¬€Ä¤€¼€ÈÔÀ¤€¨€ÈÔÀ¤ì((€™Õ¹Ñ¥½¸…‘‘5•…°¡µ•…°è=µ¥Ðñ5•…°°€‰¥ˆð€‰É•½É‘•‘Ðˆø¤ì(€€€½¹‘‘5•…°¡ì€¸¸¹µ•…°°¥èÉåÁÑ¼¹É…¹‘½µUU% ¤°É•½É‘•‘Ðè…Ñ”¹¹½Ü ¤ô¤ì(€€€Í•Ñ5•…±=Á•¸¡™…±Í”¤ì(€€€¹½Ñ¥™ä¡€‘íµ•…°¹¹…µ•ô…‘‘•Ñ¼Ñ½‘…ä¹€¤ì(€ô((€™Õ¹Ñ¥½¸Í…Ù•5•…°¡µ•…°è5•…°¤ì(€€€½¹UÁ‘…Ñ•5•…°¡µ•…°¤ì(€€€Í•Ñ‘¥Ñ¥¹5•…°¡¹Õ±°¤ì(€€€¹½Ñ¥™ä¡€‘íµ•…°¹¹…µ•ô½ÉÉ•Ñ•¹€¤ì(€ô((€É•ÑÕÉ¸€ (€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰ÍÉ••¸ˆø(€€€€€€ñMÉ••¹!•…‘¥¹œ•å•‰É½Üô‰9ÕÑÉ¥Ñ¥½¸ˆÑ¥Ñ±”ô‰Õ•°ˆ½Áäô‰1½œÝ¡…Ðå½Ô•…Ð…¹‘É¥¹¬Ý¥Ñ¡½ÕÐÑÕÉ¹¥¹œ¥Ð¥¹Ñ¼…¹½Ñ¡•È©½ˆ¸ˆ…Ñ¥½¸õìñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰™Õ•°µ±½œµ…Ñ¥½¸ˆ½¹±¥¬õì ¤€ôøÍ•Ñ5•…±=Á•¸¡ÑÉÕ”¥ôøñ½É•%½¸¹…µ”ô‰Á±ÕÌˆ¼ø1½œµ•…°ð½‰ÕÑÑ½¸ùô€¼ø((€€€€€€ñÍ•Ñ¥½¸±…ÍÍ9…µ”ô‰™Õ•°µ½µµ…¹ˆø(€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰•¹•Éäµ½Áäˆø(€€€€€€€€€€ñÀ±…ÍÍ9…µ”ô‰•å•‰É½Ü¡½Ðˆù1½•Ñ½‘…äð½Àø(€€€€€€€€€€ñ‘¥ØøñÍÑÉ½¹œùí…±½É¥•Ì¹Ñ½1½…±•MÑÉ¥¹œ ¥ôð½ÍÑÉ½¹œøñÍÁ…¸ù­…°ð½ÍÁ…¸øð½‘¥Øø(€€€€€€€€€€ñÀøñˆùí5…Ñ ¹µ…à À°…±½É¥•Q…É•Ð€´…±½É¥•Ì¤¹Ñ½1½…±•MÑÉ¥¹œ ¥ôÉ•µ…¥¹¥¹œð½ˆøñÍÁ…¸ù……¥¹ÍÐÑ¡”ÕÉÉ•¹Ð‘•™…Õ±ÐÑ…É•Ðð½ÍÁ…¸øð½Àø(€€€€€€€€€€ñ¤±…ÍÍ9…µ”ô‰™Õ•°µÁÉ½É•ÍÌˆÉ½±”ô‰ÁÉ½É•ÍÍ‰…Èˆ…É¥„µ±…‰•°ô‰¹•Éä±½•ˆ…É¥„µÙ…±Õ•µ¥¸õìÁô…É¥„µÙ…±Õ•µ…àõìÄÀÁô…É¥„µÙ…±Õ•¹½Üõí…±½É¥•AÉ½É•ÍÍôøñˆÍÑå±”õíìÝ¥‘Ñ è€‘í…±½É¥•AÉ½É•ÍÍô•€õô€¼øð½¤ø(€€€€€€€€ð½‘¥Øø(€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰µ…É¼µ±•‘•Èˆø(€€€€€€€€€íl(€€€€€€€€€€€ì¹…µ”è€‰AÉ½Ñ•¥¸ˆ°ÕÉÉ•¹ÐèÁÉ½Ñ•¥¸°Ñ…É•ÐèÁÉ½Ñ•¥¹Q…É•Ð°Õ¹¥Ðè€‰œˆ°Ñ½¹”è€‰É•ˆô°(€€€€€€€€€€€ì¹…µ”è€‰¹•Éäˆ°ÕÉÉ•¹Ðè…±½É¥•Ì°Ñ…É•Ðè…±½É¥•Q…É•Ð°Õ¹¥Ðè€ˆ­…°ˆ°Ñ½¹”è€‰‰É½¹é”ˆô°(€€€€€€€€€€€ì¹…µ”è€‰]…Ñ•Èˆ°ÕÉÉ•¹ÐèÝ…Ñ•È°Ñ…É•Ðè€ÌÈÀÀ°Õ¹¥Ðè€ˆµ°ˆ°Ñ½¹”è€‰É•…´ˆô°(€€€€€€€€€t¹µ…À ¡µ…É¼¤€ôø€ñ‘¥Ø­•äõíµ…É¼¹¹…µ•ô±…ÍÍ9…µ”õíµ…É¼¹Ñ½¹•ôø(€€€€€€€€€€€€ñÍÁ…¸ùíµ…É¼¹¹…µ•ôð½ÍÁ…¸ø(€€€€€€€€€€€€ñÍÑÉ½¹œùíµ…É¼¹ÕÉÉ•¹Ð¹Ñ½1½…±•MÑÉ¥¹œ ¥ôñÍµ…±°ø½íµ…É¼¹Ñ…É•Ð¹Ñ½1½…±•MÑÉ¥¹œ ¥õíµ…É¼¹Õ¹¥Ñôð½Íµ…±°øð½ÍÑÉ½¹œø(€€€€€€€€€€€€ñ¤É½±”ô‰ÁÉ½É•ÍÍ‰…Èˆ…É¥„µ±…‰•°õí€‘íµ…É¼¹¹…µ•ô±½•‘ô…É¥„µÙ…±Õ•µ¥¸õìÁô…É¥„µÙ…±Õ•µ…àõíµ…É¼¹Ñ…É•Ñô…É¥„µÙ…±Õ•¹½Üõí5…Ñ ¹µ¥¸¡µ…É¼¹ÕÉÉ•¹Ð°µ…É¼¹Ñ…É•Ð¥ôøñˆÍÑå±”õíìÝ¥‘Ñ è€‘í5…Ñ ¹µ¥¸ ÄÀÀ°µ…É¼¹ÕÉÉ•¹Ð€¼µ…É¼¹Ñ…É•Ð€¨€ÄÀÀ¥ô•€õô€¼øð½¤ø(€€€€€€€€€€ð½‘¥Øø¥ô(€€€€€€€€ð½‘¥Øø(€€€€€€€€ñÀ±…ÍÍ9…µ”ô‰Ñ…É•Ðµ¹½Ñ”ˆùQ¡•Í”…É”ÕÉÉ•¹Ð‘•™…Õ±ÐÑ…É•ÑÌ°¹½Ð„µ•‘¥…°ÁÉ•ÍÉ¥ÁÑ¥½¸¸A•ÉÍ½¹…°Ñ…É•ÐÍ•ÑÑ¥¹Ì½µ”±…Ñ•È¸ð½Àø(€€€€€€ð½Í•Ñ¥½¸ø((€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰™Õ•°µ±•‘•Èˆø(€€€€€€€€ñÍ•Ñ¥½¸±…ÍÍ9…µ”ô‰µ•…°µ±•‘•Èˆø(€€€€€€€€€€ñ¡•…‘•Èøñ‘¥ØøñÀ±…ÍÍ9…µ”ô‰•å•‰É½Üˆù5•…±Ìð½Àøñ ÈùQ½‘…ä™…Á½ÌíÌ¥¹Ñ…­”ð½ Èøð½‘¥ØøñÍÁ…¸ùíµ•…±Ì¹±•¹Ñ¡ô±½•ð½ÍÁ…¸øð½¡•…‘•Èø(€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰µ•…°µ±¥ÍÐˆø(€€€€€€€€€€€íµ•…±Ì¹µ…À ¡µ•…°°¥¹‘•à¤€ôø€ñ…ÉÑ¥±”­•äõíµ•…°¹¥‘ôø(€€€€€€€€€€€€€€ñÍÁ…¸±…ÍÍ9…µ”ô‰µ•…°µ¥¹‘•àˆùíMÑÉ¥¹œ¡¥¹‘•à€¬€Ä¤¹Á…‘MÑ…ÉÐ È°€ˆÀˆ¥ôð½ÍÁ…¸ø(€€€€€€€€€€€€€€ñÑ¥µ”ùíµ•…°¹Ñ¥µ•ôð½Ñ¥µ”ø(€€€€€€€€€€€€€€ñÀøñÍÑÉ½¹œùíµ•…°¹¹…µ•ôð½ÍÑÉ½¹œøñÍÁ…¸ùíµ•…°¹‘•Ñ…¥±ôð½ÍÁ…¸øð½Àø(€€€€€€€€€€€€€€ñ‘°øñ‘¥Øøñ‘ÐùAÉ½Ñ•¥¸ð½‘Ðøñ‘ùíµ•…°¹ÁÉ½Ñ•¥¹õœð½‘øð½‘¥Øøñ‘¥Øøñ‘Ðù¹•Éäð½‘Ðøñ‘ùíµ•…°¹­…±ô­…°ð½‘øð½‘¥Øøð½‘°ø(€€€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰É•½Éµ…Ñ¥½¹Ìˆø(€€€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸…É¥„µ±…‰•°õí‘¥Ð€‘íµ•…°¹¹…µ•õô½¹±¥¬õì ¤€ôøÍ•Ñ‘¥Ñ¥¹5•…°¡µ•…°¥ôù‘¥Ðð½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸…É¥„µ±…‰•°õíI•µ½Ù”€‘íµ•…°¹¹…µ•õô½¹±¥¬õì ¤€ôøì(€€€€€€€€€€€€€€€€€¥˜€¡Ý¥¹‘½Ü¹½¹™¥É´¡I•µ½Ù”€‘íµ•…°¹¹…µ•ô™É½´å½ÕÈ…½Õ¹Ðý€¤¤½¹I•µ½Ù•5•…°¡µ•…°¹¥¤ì(€€€€€€€€€€€€€€€õôùI•µ½Ù”ð½‰ÕÑÑ½¸ø(€€€€€€€€€€€€€€ð½‘¥Øø(€€€€€€€€€€€€ð½…ÉÑ¥±”ø¥ô(€€€€€€€€€€€ì…µ•…±Ì¹±•¹Ñ €˜˜€ñ‘¥Ø±…ÍÍ9…µ”ô‰µ•…°µ•µÁÑäˆøñÍÑÉ½¹œù9¼µ•…±Ì±½•å•Ð¸ð½ÍÑÉ½¹œøñÍÁ…¸ù‘Ñ¡”¹•áÐµ•…°å½Ô…ÑÕ…±±ä•…Ð¸ð½ÍÁ…¸øð½‘¥Øùô(€€€€€€€€€€ð½‘¥Øø(€€€€€€€€ð½Í•Ñ¥½¸ø((€€€€€€€€ñ…Í¥‘”±…ÍÍ9…µ”ô‰Ý…Ñ•Èµ±•‘•Èˆø(€€€€€€€€€€ñ¡•…‘•ÈøñÀ±…ÍÍ9…µ”ô‰•å•‰É½Üˆù]…Ñ•Èð½ÀøñÍÁ…¸ùíÝ…Ñ•ÉAÉ½É•ÍÍô”ð½ÍÁ…¸øð½¡•…‘•Èø(€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰Ý…Ñ•ÈµÍ½É”ˆøñÍÑÉ½¹œùì¡Ý…Ñ•È€¼€ÄÀÀÀ¤¹Ñ½¥á• È¥ôð½ÍÑÉ½¹œøñÍÁ…¸ø¼€Ì¸ÈÀ0ð½ÍÁ…¸øð½‘¥Øø(€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰Ý…Ñ•Èµ…Õ”ˆÉ½±”ô‰ÁÉ½É•ÍÍ‰…Èˆ…É¥„µ±…‰•°ô‰]…Ñ•È±½•ˆ…É¥„µÙ…±Õ•µ¥¸õìÁô…É¥„µÙ…±Õ•µ…àõìÌÈÀÁô…É¥„µÙ…±Õ•¹½ÜõíÝ…Ñ•Éôøñ¤ÍÑå±”õíìÝ¥‘Ñ è€‘íÝ…Ñ•ÉAÉ½É•ÍÍô•€õô€¼øð½‘¥Øø(€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰Ý…Ñ•Èµ…Ñ¥½¹Ìˆøñ‰ÕÑÑ½¸…É¥„µ±…‰•°ô‰I•µ½Ù”€ÈÔÀµ°Ý…Ñ•Èˆ½¹±¥¬õì ¤€ôø½¹‘©ÕÍÑ]…Ñ•È ´ÈÔÀ¥ôûŠ"Hð½‰ÕÑÑ½¸øñ‰ÕÑÑ½¸…É¥„µ±…‰•°ô‰‘€ÈÔÀµ°Ý…Ñ•Èˆ½¹±¥¬õì ¤€ôø½¹‘©ÕÍÑ]…Ñ•È ÈÔÀ¥ôù‘€ÈÔÀµ°ð½‰ÕÑÑ½¸øð½‘¥Øø(€€€€€€€€€€ñÀùíÝ…Ñ•È€øô€ÌÈÀÀ€ü€‰…¥±äÑ…É•Ðˆ€è€‰9•áÐ¡•­Á½¥¹Ð‰ô€ñÍÑÉ½¹œùì¡¹•áÑ]…Ñ•É¡•­Á½¥¹Ð€¼€ÄÀÀÀ¤¹Ñ½¥á• È¥ô0ð½ÍÑÉ½¹œøð½Àø(€€€€€€€€€ì„…¡å‘É…Ñ¥½¸¹±•¹Ñ €˜˜€ñ‘¥Ø±…ÍÍ9…µ”ô‰Ý…Ñ•Èµ¡¥ÍÑ½Éäˆø(€€€€€€€€€€€€ñÍÁ…¸ùQ½‘…ä™…Á½ÌíÌ•¹ÑÉ¥•Ìð½ÍÁ…¸ø(€€€€€€€€€€€í¡å‘É…Ñ¥½¸¹Í±¥” À°€Ð¤¹µ…À ¡•¹ÑÉä¤€ôø€ñ‘¥Ø­•äõí•¹ÑÉä¹¥‘ôø(€€€€€€€€€€€€€€ñÑ¥µ”ùí¹•Ü…Ñ”¡•¹ÑÉä¹É•½É‘•‘Ð¤¹Ñ½1½…±•Q¥µ•MÑÉ¥¹œ¡mt°ì¡½ÕÈè€ˆÈµ‘¥¥Ðˆ°µ¥¹ÕÑ”è€ˆÈµ‘¥¥Ðˆô¥ôð½Ñ¥µ”ø(€€€€€€€€€€€€€€ñÍÑÉ½¹œùí•¹ÑÉä¹…µ½Õ¹Ñ5°€ø€À€ü€ˆ¬ˆ€è€‹Š"H‰õí5…Ñ ¹…‰Ì¡•¹ÑÉä¹…µ½Õ¹Ñ5°¥ôµ°ð½ÍÑÉ½¹œø(€€€€€€€€€€€€€€ñ‰ÕÑÑ½¸½¹±¥¬õì ¤€ôøÍ•Ñ‘¥Ñ¥¹!å‘É…Ñ¥½¸¡•¹ÑÉä¥ô…É¥„µ±…‰•°õí‘¥Ð€‘í5…Ñ ¹…‰Ì¡•¹ÑÉä¹…µ½Õ¹Ñ5°¥ôµ°Ý…Ñ•È•¹ÑÉåôù‘¥Ðð½‰ÕÑÑ½¸ø(€€€€€€€€€€€€ð½‘¥Øø¥ô(€€€€€€€€€€ð½‘¥Øùô(€€€€€€€€ð½…Í¥‘”ø(€€€€€€ð½‘¥Øø(€€€€€íµ•…±=Á•¸€˜˜€ñ5•…±¥…±½œ½¹±½Í”õì ¤€ôøÍ•Ñ5•…±=Á•¸¡™…±Í”¥ô½¹‘õí…‘‘5•…±ô€¼ùô(€€€€€í•‘¥Ñ¥¹5•…°€˜˜€ñ5•…±½ÉÉ•Ñ¥½¹¥…±½œµ•…°õí•‘¥Ñ¥¹5•…±ô½¹±½Í”õì ¤€ôøÍ•Ñ‘¥Ñ¥¹5•…°¡¹Õ±°¥ô½¹M…Ù”õíÍ…Ù•5•…±ô€¼ùô(€€€€€í•‘¥Ñ¥¹!å‘É…Ñ¥½¸€˜˜€ñ!å‘É…Ñ¥½¹½ÉÉ•Ñ¥½¹¥…±½œ(€€€€€€€•¹ÑÉäõí•‘¥Ñ¥¹!å‘É…Ñ¥½¹ô(€€€€€€€½¹±½Í”õì ¤€ôøÍ•Ñ‘¥Ñ¥¹!å‘É…Ñ¥½¸¡¹Õ±°¥ô(€€€€€€€½¹M…Ù”õì¡•¹ÑÉä¤€ôøì(€€€€€€€€€½¹UÁ‘…Ñ•!å‘É…Ñ¥½¸¡•¹ÑÉä¤ì(€€€€€€€€€Í•Ñ‘¥Ñ¥¹!å‘É…Ñ¥½¸¡¹Õ±°¤ì(€€€€€€€€€¹½Ñ¥™ä ‰]…Ñ•È•¹ÑÉä½ÉÉ•Ñ•¸ˆ¤ì(€€€€€€€õô(€€€€€€€½¹I•µ½Ù”õì ¤€ôøì(€€€€€€€€€¥˜€¡Ý¥¹‘½Ü¹½¹™¥É´ ‰I•µ½Ù”Ñ¡¥ÌÝ…Ñ•È•¹ÑÉä™É½´å½ÕÈ…½Õ¹Ðüˆ¤¤ì(€€€€€€€€€€€½¹I•µ½Ù•!å‘É…Ñ¥½¸¡•‘¥Ñ¥¹!å‘É…Ñ¥½¸¹¥¤ì(€€€€€€€€€€€Í•Ñ‘¥Ñ¥¹!å‘É…Ñ¥½¸¡¹Õ±°¤ì(€€€€€€€€€€€¹½Ñ¥™ä ‰]…Ñ•È•¹ÑÉäÉ•µ½Ù•¸ˆ¤ì(€€€€€€€€€ô(€€€€€€€õô(€€€€€€¼ùô(€€€€ð½‘¥Øø(€€¤ì)ô)™Õ¹Ñ¥½¸½… ¡ì•á•É¥Í•Ì°µ•…±Ìôèì•á•É¥Í•Ìèá•É¥Í•mtìµ•…±Ìè5•…±mtô¤ì(€½¹ÍÐm¥¹ÁÕÐ°Í•Ñ%¹ÁÕÑt€ôÕÍ•MÑ…Ñ” ˆˆ¤ì(€½¹ÍÐmµ•ÍÍ…•Ì°Í•Ñ5•ÍÍ…•Ít€ôÕÍ•MÑ…Ñ”¡mìÉ½±”è€‰½… ˆ°Ñ•áÐè€‰$…¸É•Ù¥•ÜÑ¡”Í•ÑÌ…¹µ•…±Ìå½Ô±½œ¡•É”¸Q¡¥ÌÁÉ•Ù¥•ÜÕÍ•ÌÍ¥µÁ±”ÉÕ±•Ì°¹½Ð„±¥Ù”$½…¡¥¹œÍ•ÉÙ¥”¸ˆõt¤ì(€½¹ÍÐÁÉ½Ñ•¥¸€ôµ•…±Ì¹É•‘Õ” ¡Ñ½Ñ…°°µ•…°¤€ôøÑ½Ñ…°€¬µ•…°¹ÁÉ½Ñ•¥¸°€À¤ì(€½¹ÍÐ‘½¹”€ô•á•É¥Í•Ì¹™±…Ñ5…À ¡•á•É¥Í”¤€ôø•á•É¥Í”¹Í•ÑÌ¤¹™¥±Ñ•È ¡Í•Ð¤€ôøÍ•Ð¹‘½¹”¤¹±•¹Ñ ì(€½¹ÍÐÑ½Ñ…±M•ÑÌ€ô•á•É¥Í•Ì¹™±…Ñ5…À ¡•á•É¥Í”¤€ôø•á•É¥Í”¹Í•ÑÌ¤¹±•¹Ñ ì(€½¹ÍÐÁÉ½Ñ•¥¹1•™Ð€ô5…Ñ ¹µ…à À°€ÄäÀ€´ÁÉ½Ñ•¥¸¤ì(€½¹ÍÐÅÕ¥¬€ôl(€€€ì±…‰•°è€‰I•Ù¥•ÜÑ½‘…äˆ°ÁÉ½µÁÐè€‰I•Ù¥•ÜÝ¡…Ð$±½•Ñ½‘…äˆô°(€€€ì±…‰•°è€‰A±…¸„Í¥µÁ±”‘¥¹¹•Èˆ°ÁÉ½µÁÐè€‰]¡…Ð¥Ì„Í¥µÁ±”‘¥¹¹•È½ÁÑ¥½¸üˆô°(€€€ì±…‰•°è€‰‘©ÕÍÐ™½ÈÁ…¥¸ˆ°ÁÉ½µÁÐè€‰!½ÜÍ¡½Õ±$…‘©ÕÍÐ¥˜„µ½Ù•µ•¹Ð¡ÕÉÑÌüˆô°(€tì((€™Õ¹Ñ¥½¸Í•¹¡Ñ•áÐ€ô¥¹ÁÕÐ¤ì(€€€¥˜€ …Ñ•áÐ¹ÑÉ¥´ ¤¤É•ÑÕÉ¸ì(€€€½¹ÍÐ±½Ý•È€ôÑ•áÐ¹Ñ½1½Ý•É…Í” ¤ì(€€€±•Ð…¹ÍÝ•È€ôe½Ô¡…Ù”±½•€‘í‘½¹•ô½˜€‘íÑ½Ñ…±M•ÑÍôÝ½É­¥¹œÍ•ÑÌ…¹€‘íÁÉ½Ñ•¥¹ôœ½˜ÁÉ½Ñ•¥¸Ñ½‘…ä¸¥¹¥Í Ñ¡”¹•áÐÁ±…¹¹•Í•ÐÝ¥Ñ ±•…¸Ñ•¡¹¥ÅÕ”‰•™½É”…‘‘¥¹œµ½É”Ý½É¬¹€ì(€€€¥˜€¡±½Ý•È¹¥¹±Õ‘•Ì ‰‘¥¹¹•Èˆ¤ñð±½Ý•È¹¥¹±Õ‘•Ì ‹¸ˆ¤¤…¹ÍÝ•È€ôQ¡”ÕÉÉ•¹Ð‘•™…Õ±ÐÑ…É•Ð±•…Ù•Ì…‰½ÕÐ€‘íÁÉ½Ñ•¥¹1•™Ñôœ½˜ÁÉ½Ñ•¥¸¸-••À‘¥¹¹•ÈÍ¥µÁ±”è„ÁÉ½Ñ•¥¸Í½ÕÉ”°É¥”½È…¹½Ñ¡•È…É‰½¡å‘É…Ñ”°Ù••Ñ…‰±•Ì…¹Ý…Ñ•È¸‘©ÕÍÐÁ½ÉÑ¥½¹ÌÑ¼å½ÕÈ¹••‘Ì¹€ì(€€€¥˜€¡±½Ý•È¹¥¹±Õ‘•Ì ‰Á…¥¸ˆ¤ñð±½Ý•È¹¥¹±Õ‘•Ì ‰¡ÕÉÐˆ¤ñð±½Ý•È¹¥¹±Õ‘•Ì ‹E…Ôˆ¤¤…¹ÍÝ•È€ô€‰MÑ½ÀÑ¡”Á…¥¹™Õ°µ½Ù•µ•¹Ð¸I•‘Õ”±½…½ÈÉ…¹”½¹±ä¥˜Ñ¡”µ½Ù•µ•¹Ð‰•½µ•ÌÁ…¥¸µ™É•”¸9•ÜÍÝ•±±¥¹œ°Ý•…­¹•ÍÌ½ÈÁ•ÉÍ¥ÍÑ•¹ÐÁ…¥¸¹••‘ÌÅÕ…±¥™¥•µ•‘¥…°…‘Ù¥”¸ˆì(€€€Í•Ñ5•ÍÍ…•Ì ¡ÕÉÉ•¹Ð¤€ôøl¸¸¹ÕÉÉ•¹Ð°ìÉ½±”è€‰ÕÍ•Èˆ°Ñ•áÐô°ìÉ½±”è€‰½… ˆ°Ñ•áÐè…¹ÍÝ•Èõt¤ì(€€€Í•Ñ%¹ÁÕÐ ˆˆ¤ì(€ô((€½¹ÍÐ¹•áÑ5½Ù”€ô‘½¹”€ü½¹Ñ¥¹Õ”Ý¥Ñ Í•Ð€‘í5…Ñ ¹µ¥¸¡‘½¹”€¬€Ä°Ñ½Ñ…±M•ÑÌ¥ô½˜€‘íÑ½Ñ…±M•ÑÍô¹€€è€‰MÑ…ÉÐÝ¥Ñ Ñ¡”™¥ÉÍÐÁ±…¹¹•µ½Ù•µ•¹Ð¸ˆì((€É•ÑÕÉ¸€ (€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰ÍÉ••¸½… µÍÉ••¸ˆø(€€€€€€ñMÉ••¹!•…‘¥¹œ•å•‰É½Üô‰½… ˆÑ¥Ñ±”ô‰Í•½¹½Á¥¹¥½¸°¹½Ð…¹½Ñ¡•È‘…Í¡‰½…É¸ˆ½Áäô‰Í¬…‰½ÕÐÝ¡…Ðå½Ô¡…Ù”±½•Ñ½‘…ä¸ˆ…Ñ¥½¸õìñÍÁ…¸±…ÍÍ9…µ”ô‰½… µÁÉ•Ù¥•ÜµÁ¥±°ˆùÕ¥‘…¹”ÁÉ•Ù¥•Üð½ÍÁ…¸ùô€¼ø((€€€€€€ñÍ•Ñ¥½¸±…ÍÍ9…µ”ô‰½… µ¹•áÐµµ½Ù”ˆø(€€€€€€€€ñ‘¥ØøñÀ±…ÍÍ9…µ”ô‰•å•‰É½Ü¡½Ðˆù9•áÐÕÍ•™Õ°µ½Ù”ð½Àøñ Èùí¹•áÑ5½Ù•ôð½ ÈøñÍÁ…¸ù-••ÀÑ¡”‘•¥Í¥½¸Íµ…±°¸Q•¡¹¥ÅÕ”…¹Á…¥¸µ™É•”µ½Ù•µ•¹Ð½µ”‰•™½É”•áÑÉ„±½…¸ð½ÍÁ…¸øð½‘¥Øø(€€€€€€€€ñ‰ÕÑÑ½¸½¹±¥¬õì ¤€ôøÍ•¹ ‰I•Ù¥•ÜÝ¡…Ð$±½•Ñ½‘…äˆ¥ôùáÁ±…¥¸Ñ¡¥Ì€ñˆûŠHð½ˆøð½‰ÕÑÑ½¸ø(€€€€€€ð½Í•Ñ¥½¸ø((€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰½… µÝ½É­ÍÁ…”ˆø(€€€€€€€€ñÍ•Ñ¥½¸±…ÍÍ9…µ”ô‰½… µ¡…Ðˆø(€€€€€€€€€€ñ¡•…‘•È±…ÍÍ9…µ”ô‰½… µ¡…Ðµ¡•…ˆø(€€€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰™½É”µ½ÉˆˆøñÍÁ…¸ùð½ÍÁ…¸øð½‘¥Øø(€€€€€€€€€€€€ñ‘¥ØøñÀù=I½… ð½ÀøñÍµ…±°ùIÕ±”µ‰…Í•ÁÉ½Ñ½ÑåÁ”ð½Íµ…±°øð½‘¥Øø(€€€€€€€€€€ð½¡•…‘•Èø(€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰½¹Ù•ÉÍ…Ñ¥½¸µ™••ˆÉ½±”ô‰±½œˆ…É¥„µ±¥Ù”ô‰Á½±¥Ñ”ˆ…É¥„µ±…‰•°ô‰½… ½¹Ù•ÉÍ…Ñ¥½¸ˆø(€€€€€€€€€€€íµ•ÍÍ…•Ì¹µ…À ¡µ•ÍÍ…”°¥¹‘•à¤€ôø€ñ‘¥Ø±…ÍÍ9…µ”õí¡…Ðµ‰Õ‰‰±”€‘íµ•ÍÍ…”¹É½±•õô­•äõí¥¹‘•áôøñÍµ…±°ùíµ•ÍÍ…”¹É½±”€ôôô€‰½… ˆ€ü€‰=Iˆ€è€‰e½Ô‰ôð½Íµ…±°øñÀùíµ•ÍÍ…”¹Ñ•áÑôð½Àøð½‘¥Øø¥ô(€€€€€€€€€€ð½‘¥Øø(€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰½… µÅÕ¥¬µÁÉ½µÁÑÌˆ…É¥„µ±…‰•°ô‰MÕ•ÍÑ•½… ÅÕ•ÍÑ¥½¹Ìˆø(€€€€€€€€€€€íÅÕ¥¬¹µ…À ¡¥Ñ•´¤€ôø€ñ‰ÕÑÑ½¸½¹±¥¬õì ¤€ôøÍ•¹¡¥Ñ•´¹ÁÉ½µÁÐ¥ô­•äõí¥Ñ•´¹±…‰•±ôùí¥Ñ•´¹±…‰•±ôð½‰ÕÑÑ½¸ø¥ô(€€€€€€€€€€ð½‘¥Øø(€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰½… µ½µÁ½Í•Èˆø(€€€€€€€€€€€€ñ¥¹ÁÕÐ…É¥„µ±…‰•°ô‰Í¬½É”½… ˆÙ…±Õ”õí¥¹ÁÕÑô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÍ•Ñ%¹ÁÕÐ¡•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”¥ô½¹-•å½Ý¸õì¡•Ù•¹Ð¤€ôø•Ù•¹Ð¹­•ä€ôôô€‰¹Ñ•Èˆ€˜˜Í•¹ ¥ôÁ±…•¡½±‘•Èô‰Í¬…‰½ÕÐÑ½‘…çŠeÌÑÉ…¥¹¥¹œ½È™½½“Š˜ˆ€¼ø(€€€€€€€€€€€€ñ‰ÕÑÑ½¸…É¥„µ±…‰•°ô‰M•¹µ•ÍÍ…”ˆ½¹±¥¬õì ¤€ôøÍ•¹ ¥ôûŠDð½‰ÕÑÑ½¸ø(€€€€€€€€€€ð½‘¥Øø(€€€€€€€€ð½Í•Ñ¥½¸ø((€€€€€€€€ñ…Í¥‘”±…ÍÍ9…µ”ô‰½… µ¥¹Ñ•°ˆø(€€€€€€€€€€ñ¡•…‘•ÈøñÀù]¡…ÐÑ¡¥ÌÁÉ•Ù¥•Ü…¸Í•”ð½ÀøñÍÁ…¸ùQ½‘…äð½ÍÁ…¸øð½¡•…‘•Èø(€€€€€€€€€€ñ‘°±…ÍÍ9…µ”ô‰½… µ™…ÑÌˆø(€€€€€€€€€€€€ñ‘¥Øøñ‘ÐùM•ÑÌ±½•ð½‘Ðøñ‘ùí‘½¹•ô€¼íÑ½Ñ…±M•ÑÍôð½‘øð½‘¥Øø(€€€€€€€€€€€€ñ‘¥Øøñ‘Ðù5•…±Ì±½•ð½‘Ðøñ‘ùíµ•…±Ì¹±•¹Ñ¡ôð½‘øð½‘¥Øø(€€€€€€€€€€€€ñ‘¥Øøñ‘ÐùAÉ½Ñ•¥¸±½•ð½‘Ðøñ‘ùíÁÉ½Ñ•¥¹ôœð½‘øð½‘¥Øø(€€€€€€€€€€ð½‘°ø(€€€€€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰½… µÕ…É‘É…¥°ˆø(€€€€€€€€€€€€ñÍÁ…¸ø„ð½ÍÁ…¸ø(€€€€€€€€€€€€ñ‘¥ØøñÍµ…±°ùM…™•Ñä‰½Õ¹‘…Éäð½Íµ…±°øñÍÑÉ½¹œùA…¥¸¡…¹•ÌÑ¡”Á±…¸ð½ÍÑÉ½¹œøñÀù=I…¹¹½Ð‘¥…¹½Í”¥¹©ÕÉä½ÈÉ•Á±…”µ•‘¥…°…É”¸ð½Àøð½‘¥Øø(€€€€€€€€€€ð½‘¥Øø(€€€€€€€€€€ñÀ±…ÍÍ9…µ”ô‰½… µ¥¹Ñ•°µ¹½Ñ”ˆùQ¡¥ÌÁÉ½Ñ½ÑåÁ”‘½•Ì¹½Ð…±°„ÁÉ½‘ÕÑ¥½¸$µ½‘•°¸%ÑÌ…¹ÍÝ•ÉÌ…É”¥¹Ñ•¹Ñ¥½¹…±±ä±¥µ¥Ñ•…¹‰…Í•½¹±ä½¸Ñ¡”É•½É‘ÌÍ¡½Ý¸¡•É”¸ð½Àø(€€€€€€€€ð½…Í¥‘”ø(€€€€€€ð½‘¥Øø(€€€€ð½‘¥Øø(€€¤ì)ô()™Õ¹Ñ¥½¸AÉ½É•ÍÌ¡ì(€•á•É¥Í•Ì°(€¡¥ÍÑ½Éä°(€Ý½É­½ÕÑMÑ…ÉÑ•°(€½¹QÉ…¥¸°(€½¹UÁ‘…Ñ•]½É­½ÕÐ°(€½¹•±•Ñ•]½É­½ÕÐ°)ôèì(€•á•É¥Í•Ìèá•É¥Í•mtì(€¡¥ÍÑ½Éäè]½É­½ÕÑMÕµµ…Éåmtì(€Ý½É­½ÕÑMÑ…ÉÑ•è‰½½±•…¸ì(€½¹QÉ…¥¸è€ ¤€ôøÙ½¥ì(€½¹UÁ‘…Ñ•]½É­½ÕÐè€¡Ý½É­½ÕÐè]½É­½ÕÑMÕµµ…Éä¤€ôøÙ½¥ì(€½¹•±•Ñ•]½É­½ÕÐè€¡¥èÍÑÉ¥¹œ¤€ôøÙ½¥ì)ô¤ì(€½¹ÍÐmÉ…¹”°Í•ÑI…¹•t€ôÕÍ•MÑ…Ñ” ˆÄÉ\ˆ¤ì(€½¹ÍÐmÉ•™•É•¹•Q¥µ•t€ôÕÍ•MÑ…Ñ”¡…Ñ”¹¹½Ü¤ì(€½¹ÍÐm•‘¥Ñ¥¹]½É­½ÕÐ°Í•Ñ‘¥Ñ¥¹]½É­½ÕÑt€ôÕÍ•MÑ…Ñ”ñ]½É­½ÕÑMÕµµ…Éäð¹Õ±°ø¡¹Õ±°¤ì(€½¹ÍÐÉ…¹•…åÌ€ôÉ…¹”€ôôô€ˆÑ\ˆ€ü€Èà€èÉ…¹”€ôôô€ˆÙ4ˆ€ü€ÄàÌ€è€àÐì(€½¹ÍÐÕÑ½™˜€ôÉ•™•É•¹•Q¥µ”€´É…¹•…åÌ€¨€ÈÐ€¨€ØÀ€¨€ØÀ€¨€ÄÀÀÀì(€½¹ÍÐ™¥±Ñ•É•‘!¥ÍÑ½Éä€ô¡¥ÍÑ½Éä¹™¥±Ñ•È ¡Í•ÍÍ¥½¸¤€ôøÍ•ÍÍ¥½¸¹½µÁ±•Ñ•‘Ð€øôÕÑ½™˜¤ì(€½¹ÍÐ¡…ÉÑM•ÍÍ¥½¹Ì€ô™¥±Ñ•É•‘!¥ÍÑ½Éä¹Í±¥” À°€ÄÈ¤¹É•Ù•ÉÍ” ¤ì(€½¹ÍÐÕÉÉ•¹ÑY½±Õµ”€ô•á•É¥Í•Ì¹™±…Ñ5…À ¡•á•É¥Í”¤€ôø•á•É¥Í”¹Í•ÑÌ¤¹™¥±Ñ•È ¡Í•Ð¤€ôøÍ•Ð¹‘½¹”¤¹É•‘Õ” ¡Ñ½Ñ…°°Í•Ð¤€ôøÑ½Ñ…°€¬Í•Ð¹­œ€¨Í•Ð¹É•ÁÌ°€À¤ì(€½¹ÍÐ±…Ñ•ÍÐ€ô¡¥ÍÑ½ÉålÁt„ì(€½¹ÍÐÑ½Ñ…±Y½±Õµ”€ô™¥±Ñ•É•‘!¥ÍÑ½Éä¹É•‘Õ” ¡Ñ½Ñ…°°Í•ÍÍ¥½¸¤€ôøÑ½Ñ…°€¬Í•ÍÍ¥½¸¹Ù½±Õµ”°€À¤ì(€½¹ÍÐ…Ù•É…•I¥È€ô™¥±Ñ•É•‘!¥ÍÑ½Éä¹±•¹Ñ €ü™¥±Ñ•É•‘!¥ÍÑ½Éä¹É•‘Õ” ¡Ñ½Ñ…°°Í•ÍÍ¥½¸¤€ôøÑ½Ñ…°€¬Í•ÍÍ¥½¸¹…Ù•É…•I¥È°€À¤€¼™¥±Ñ•É•‘!¥ÍÑ½Éä¹±•¹Ñ €è€Àì(€½¹ÍÐµ…áY½±Õµ”€ô5…Ñ ¹µ…à Ä°€¸¸¹¡…ÉÑM•ÍÍ¥½¹Ì¹µ…À ¡Í•ÍÍ¥½¸¤€ôøÍ•ÍÍ¥½¸¹Ù½±Õµ”¤¤ì(€½¹ÍÐÑÉ•¹‘½Áä€ô™¥±Ñ•É•‘!¥ÍÑ½Éä¹±•¹Ñ €ð€Ì(€€€€ü1½œ€‘ìÌ€´™¥±Ñ•É•‘!¥ÍÑ½Éä¹±•¹Ñ¡ôµ½É”€‘ìÌ€´™¥±Ñ•É•‘!¥ÍÑ½Éä¹±•¹Ñ €ôôô€Ä€ü€‰Í•ÍÍ¥½¸ˆ€è€‰Í•ÍÍ¥½¹Ì‰ô‰•™½É”¡…¹¥¹œÑ¡”Á±…¸¹€(€€€€è€‰¹½Õ ‘…Ñ„¥Ì™½Éµ¥¹œ¸½µÁ…É”Ñ•¡¹¥ÅÕ”°±•…¸É•ÁÌ±•™Ð…¹Ù½±Õµ”‰•™½É”…‘‘¥¹œ±½…¸ˆì((€¥˜€ …¡¥ÍÑ½Éä¹±•¹Ñ ¤ì(€€€É•ÑÕÉ¸€ (€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰ÍÉ••¸ˆø(€€€€€€€€ñMÉ••¹!•…‘¥¹œ•å•‰É½Üô‰AÉ½É•ÍÌˆÑ¥Ñ±”ô‰AÉ½É•ÍÌÍÑ…ÉÑÌÝ¥Ñ ½¹”Í…Ù•Ý½É­½ÕÐ¸ˆ½Áäô‰=¹±ä½µÁ±•Ñ•…½Õ¹ÐÉ•½É‘Ì…ÁÁ•…È¡•É”¸ˆ€¼ø(€€€€€€€€ñÍ•Ñ¥½¸±…ÍÍ9…µ”ô‰ÁÉ½É•ÍÌµ•µÁÑäˆø(€€€€€€€€€€ñÍÁ…¸øÀÄð½ÍÁ…¸ø(€€€€€€€€€€ñ‘¥ØøñÀ±…ÍÍ9…µ”ô‰•å•‰É½Ü¡½ÐˆùíÝ½É­½ÕÑMÑ…ÉÑ•€ü€‰]½É­½ÕÐ¥¸ÁÉ½É•ÍÌˆ€è€‰9¼½µÁ±•Ñ•Ý½É­½ÕÑÌå•Ð‰ôð½Àøñ ÈùíÝ½É­½ÕÑMÑ…ÉÑ•€ü€‰¥¹¥Í Ñ½‘…çŠeÌÝ½É­½ÕÐÑ¼É•…Ñ”å½ÕÈ‰…Í•±¥¹”¸ˆ€è€‰É•…Ñ”Ñ¡”™¥ÉÍÐÉ•…°‘…Ñ„Á½¥¹Ð¸‰ôð½ ÈøñÀùíÝ½É­½ÕÑMÑ…ÉÑ•€˜˜ÕÉÉ•¹ÑY½±Õµ”€ü€‘íÕÉÉ•¹ÑY½±Õµ”¹Ñ½1½…±•MÑÉ¥¹œ ¥ô­œ±½•Í¼™…È¸M…Ù”Ñ¡”Ý½É­½ÕÐÑ¼…‘¥ÐÑ¼å½ÕÈ¡¥ÍÑ½Éä¹€€è€‰½µÁ±•Ñ”…¹Í…Ù”„Ý½É­½ÕÐ¸Y½±Õµ”°•™™½ÉÐ…¹‰•ÍÐÍ•ÑÌÝ¥±°…ÁÁ•…È¡•É”…ÕÑ½µ…Ñ¥…±±ä¸‰ôð½Àøð½‘¥Øø(€€€€€€€€€€ñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰ÁÉ¥µ…Éäµ…Ñ¥½¸ˆ½¹±¥¬õí½¹QÉ…¥¹ôùíÝ½É­½ÕÑMÑ…ÉÑ•€ü€‰I•ÍÕµ”Í•ÍÍ¥½¸ˆ€è€‰=Á•¸ÑÉ…¥¹¥¹œ‰ô€ñˆûŠHð½ˆøð½‰ÕÑÑ½¸ø(€€€€€€€€ð½Í•Ñ¥½¸ø(€€€€€€ð½‘¥Øø(€€€€¤ì(€ô((€É•ÑÕÉ¸€ (€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰ÍÉ••¸ˆø(€€€€€€ñMÉ••¹!•…‘¥¹œ•å•‰É½Üô‰AÉ½É•ÍÌˆÑ¥Ñ±”ô‰]¡…ÐÑ¡”Ý½É¬¡…¹•¸ˆ½Áäô‰½µÁ±•Ñ•Ý½É­½ÕÑÌ½¹±çŠQ¹¼Á±…•¡½±‘•Èµ•ÑÉ¥Ì¸ˆ…Ñ¥½¸õìñ‘¥Ø±…ÍÍ9…µ”ô‰É…¹”µÍÝ¥Ñ ˆÉ½±”ô‰É½ÕÀˆ…É¥„µ±…‰•°ô‰AÉ½É•ÍÌÑ¥µ”É…¹”ˆùílˆÑ\ˆ°€ˆÄÉ\ˆ°€ˆÙ4‰t¹µ…À ¡¥Ñ•´¤€ôø€ñ‰ÕÑÑ½¸…É¥„µÁÉ•ÍÍ•õíÉ…¹”€ôôô¥Ñ•µô±…ÍÍ9…µ”õíÉ…¹”€ôôô¥Ñ•´€ü€‰…Ñ¥Ù”ˆ€è€ˆ‰ô½¹±¥¬õì ¤€ôøÍ•ÑI…¹”¡¥Ñ•´¥ô­•äõí¥Ñ•µôùí¥Ñ•µôð½‰ÕÑÑ½¸ø¥ôð½‘¥Øùô€¼ø(€€€€€€ñÍ•Ñ¥½¸±…ÍÍ9…µ”ô‰ÁÉ½É•ÍÌµ½Ù•ÉÙ¥•Üˆø(€€€€€€€€ñ‘¥ØøñÀ±…ÍÍ9…µ”ô‰•å•‰É½ÜˆùMMM%=9Lð½ÀøñÍÑÉ½¹œùí™¥±Ñ•É•‘!¥ÍÑ½Éä¹±•¹Ñ¡ôð½ÍÑÉ½¹œøñÍÁ…¸ù½µÁ±•Ñ•¥¸íÉ…¹•ôð½ÍÁ…¸øð½‘¥Øø(€€€€€€€€ñ‘¥ØøñÀ±…ÍÍ9…µ”ô‰•å•‰É½ÜˆùQ=Q0Y=1U5ð½ÀøñÍÑÉ½¹œùì¡Ñ½Ñ…±Y½±Õµ”€¼€ÄÀÀÀ¤¹Ñ½¥á• Ä¥ôñÍµ…±°øÐð½Íµ…±°øð½ÍÑÉ½¹œøñÍÁ…¸ù™É½´Í…Ù•Ý½É­¥¹œÍ•ÑÌð½ÍÁ…¸øð½‘¥Øø(€€€€€€€€ñ‘¥ØøñÀ±…ÍÍ9…µ”ô‰•å•‰É½ÜˆùYI=IPð½ÀøñÍÑÉ½¹œùí…Ù•É…•I¥È¹Ñ½¥á• Ä¥ôñÍµ…±°øÉ•ÁÌ±•™Ðð½Íµ…±°øð½ÍÑÉ½¹œøñÍÁ…¸ù±•…¸É•ÁÌ±•™Ð…É½ÍÌÍ…Ù•Ý½É­½ÕÑÌð½ÍÁ…¸øð½‘¥Øø(€€€€€€ð½Í•Ñ¥½¸ø(€€€€€€ñÍ•Ñ¥½¸±…ÍÍ9…µ”ô‰±…Ñ•ÍÐµ™½É”ˆø(€€€€€€€€ñ‘¥ØøñÀ±…ÍÍ9…µ”ô‰•å•‰É½Ü¡½Ðˆù1…Ñ•ÍÐÝ½É­½ÕÐð½Àøñ Èùí±…Ñ•ÍÐ¹Ñ¥Ñ±•ôð½ ÈøñÍÁ…¸ùí±…Ñ•ÍÐ¹‰•ÍÑM•Ñôð½ÍÁ…¸øð½‘¥Øø(€€€€€€€€ñ‘°ø(€€€€€€€€€€ñ‘¥Øøñ‘ÐùY½±Õµ”ð½‘Ðøñ‘ùí±…Ñ•ÍÐ¹Ù½±Õµ”¹Ñ½1½…±•MÑÉ¥¹œ ¥ô­œð½‘øð½‘¥Øø(€€€€€€€€€€ñ‘¥Øøñ‘ÐùÕÉ…Ñ¥½¸ð½‘Ðøñ‘ùí™½Éµ…Ñ±½¬¡±…Ñ•ÍÐ¹‘ÕÉ…Ñ¥½¹M•½¹‘Ì¥ôð½‘øð½‘¥Øø(€€€€€€€€€€ñ‘¥Øøñ‘ÐùÙ•É…”É•ÁÌ±•™Ðð½‘Ðøñ‘ùí±…Ñ•ÍÐ¹…Ù•É…•I¥È¹Ñ½¥á• Ä¥ôð½‘øð½‘¥Øø(€€€€€€€€ð½‘°ø(€€€€€€ð½Í•Ñ¥½¸ø(€€€€€€ñÍ•Ñ¥½¸±…ÍÍ9…µ”ô‰Á•É™½Éµ…¹”µ¡…ÉÐˆø(€€€€€€€€ñ¡•…‘•Èøñ‘¥ØøñÀ±…ÍÍ9…µ”ô‰•å•‰É½Üˆù]½É­½ÕÐÙ½±Õµ”ð½Àøñ ÈùM…Ù•Ý½É¬°Ý½É­½ÕÐ‰äÝ½É­½ÕÐ¸ð½ Èøð½‘¥ØøñÍÁ…¸ùíÉ…¹•ôƒ
+Üí¡…ÉÑM•ÍÍ¥½¹Ì¹±•¹Ñ¡ô±½•ð½ÍÁ…¸øð½¡•…‘•Èø(€€€€€€€í¡…ÉÑM•ÍÍ¥½¹Ì¹±•¹Ñ €ü€ñ‘¥Ø±…ÍÍ9…µ”ô‰‰…ÉÌÉ•…°µ‰…ÉÌˆùí¡…ÉÑM•ÍÍ¥½¹Ì¹µ…À ¡Í•ÍÍ¥½¸°¥¹‘•à¤€ôø€ñ‘¥Ø­•äõíÍ•ÍÍ¥½¸¹¥‘ôÑ¥Ñ±”õí€‘íÍ•ÍÍ¥½¸¹Ù½±Õµ”¹Ñ½1½…±•MÑÉ¥¹œ ¥ô­ôøñ¤ÍÑå±”õíì¡•¥¡Ðè€‘í5…Ñ ¹µ…à ÄÈ°Í•ÍÍ¥½¸¹Ù½±Õµ”€¼µ…áY½±Õµ”€¨€ÄÀÀ¥ô•€õô±…ÍÍ9…µ”õí¥¹‘•à€ôôô¡…ÉÑM•ÍÍ¥½¹Ì¹±•¹Ñ €´€Ä€ü€‰¡½Ðˆ€è€ˆ‰ô€¼øñÍµ…±°ùí¹•Ü…Ñ”¡Í•ÍÍ¥½¸¹½µÁ±•Ñ•‘Ð¤¹Ñ½1½…±•…Ñ•MÑÉ¥¹œ ‰•¸µˆ°ì‘…äè€ˆÈµ‘¥¥Ðˆ°µ½¹Ñ è€‰Í¡½ÉÐˆô¥ôð½Íµ…±°øð½‘¥Øø¥ôð½‘¥Øø€è€ñÀ±…ÍÍ9…µ”ô‰É…¹”µ•µÁÑäˆù9¼½µÁ±•Ñ•Í•ÍÍ¥½¹Ì¥¸Ñ¡¥ÌÉ…¹”¸ð½Àùô(€€€€€€ð½Í•Ñ¥½¸ø(€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰ÁÉ½É•ÍÌµ±½Ý•Èˆø(€€€€€€€€ñÍ•Ñ¥½¸±…ÍÍ9…µ”ô‰É••¹ÐµÍ•ÍÍ¥½¹Ìˆø(€€€€€€€€€€ñ¡•…‘•ÈøñÀ±…ÍÍ9…µ”ô‰•å•‰É½ÜˆùI••¹ÐÝ½É­½ÕÑÌð½ÀøñÍÁ…¸ùí¡¥ÍÑ½Éä¹±•¹Ñ¡ôÑ½Ñ…°ð½ÍÁ…¸øð½¡•…‘•Èø(€€€€€€€€€íÝ½É­½ÕÑMÑ…ÉÑ•€˜˜€ñ‘¥ØøñÑ¥µ”ùQ½‘…äð½Ñ¥µ”øñÍÑÉ½¹œùUÁÁ•ÈÍÑÉ•¹Ñ ð½ÍÑÉ½¹œøñÍÁ…¸ùíÕÉÉ•¹ÑY½±Õµ”€ü€‘íÕÉÉ•¹ÑY½±Õµ”¹Ñ½1½…±•MÑÉ¥¹œ ¥ô­€€è€‰%¸ÁÉ½É•ÍÌ‰ôð½ÍÁ…¸øñˆù1%Yð½ˆøð½‘¥Øùô(€€€€€€€€€í¡¥ÍÑ½Éä¹Í±¥” À°€Ð¤¹µ…À ¡Í•ÍÍ¥½¸¤€ôø€ñ‘¥Ø­•äõíÍ•ÍÍ¥½¸¹¥‘ôøñÑ¥µ”ùí¹•Ü…Ñ”¡Í•ÍÍ¥½¸¹½µÁ±•Ñ•‘Ð¤¹Ñ½1½…±•…Ñ•MÑÉ¥¹œ ‰•¸µˆ°ì‘…äè€ˆÈµ‘¥¥Ðˆ°µ½¹Ñ è€‰Í¡½ÉÐˆô¥ôð½Ñ¥µ”øñÍÑÉ½¹œùíÍ•ÍÍ¥½¸¹Ñ¥Ñ±•ôð½ÍÑÉ½¹œøñÍÁ…¸ùíÍ•ÍÍ¥½¸¹Ù½±Õµ”¹Ñ½1½…±•MÑÉ¥¹œ ¥ô­œð½ÍÁ…¸øñˆùíÍ•ÍÍ¥½¸¹½µÁ±•Ñ•‘M•ÑÍô½íÍ•ÍÍ¥½¸¹Ñ½Ñ…±M•ÑÍôð½ˆøñ‘¥Ø±…ÍÍ9…µ”ô‰É•½Éµ…Ñ¥½¹Ìˆøñ‰ÕÑÑ½¸…É¥„µ±…‰•°õí‘¥Ð€‘íÍ•ÍÍ¥½¸¹Ñ¥Ñ±•ôÝ½É­½ÕÑô½¹±¥¬õì ¤€ôøÍ•Ñ‘¥Ñ¥¹]½É­½ÕÐ¡Í•ÍÍ¥½¸¥ôù‘¥Ðð½‰ÕÑÑ½¸øñ‰ÕÑÑ½¸…É¥„µ±…‰•°õíI•µ½Ù”€‘íÍ•ÍÍ¥½¸¹Ñ¥Ñ±•ôÝ½É­½ÕÑô½¹±¥¬õì ¤€ôøì(€€€€€€€€€€€¥˜€¡Ý¥¹‘½Ü¹½¹™¥É´ ‰I•µ½Ù”Ñ¡¥Ì½µÁ±•Ñ•Ý½É­½ÕÐ™É½´å½ÕÈ…½Õ¹Ðüˆ¤¤½¹•±•Ñ•]½É­½ÕÐ¡Í•ÍÍ¥½¸¹¥¤ì(€€€€€€€€€õôùI•µ½Ù”ð½‰ÕÑÑ½¸øð½‘¥Øøð½‘¥Øø¥ô(€€€€€€€€ð½Í•Ñ¥½¸ø(€€€€€€€€ñÍ•Ñ¥½¸±…ÍÍ9…µ”ô‰ÁÉ½É•ÍÌµ¥¹Í¥¡Ðˆø(€€€€€€€€€€ñÀ±…ÍÍ9…µ”ô‰•å•‰É½Üˆù9•áÐÉ•Ù¥•Üð½Àø(€€€€€€€€€€ñÍÁ…¸ûŠr˜ð½ÍÁ…¸ø(€€€€€€€€€€ñ Èù…É¸Ñ¡”ÑÉ•¹¸ð½ Èø(€€€€€€€€€€ñÀùíÑÉ•¹‘½Áåôð½Àø(€€€€€€€€€€ñÍµ…±°ù=IÝ¥±°¹½ÐÉ•½µµ•¹ÁÉ½É•ÍÍ¥½¸™É½´„Í¥¹±”½½‘…ä¸ð½Íµ…±°ø(€€€€€€€€ð½Í•Ñ¥½¸ø(€€€€€€ð½‘¥Øø(€€€€€í•‘¥Ñ¥¹]½É­½ÕÐ€˜˜€ñ]½É­½ÕÑ½ÉÉ•Ñ¥½¹¥…±½œ(€€€€€€€Ý½É­½ÕÐõí•‘¥Ñ¥¹]½É­½ÕÑô(€€€€€€€½¹±½Í”õì ¤€ôøÍ•Ñ‘¥Ñ¥¹]½É­½ÕÐ¡¹Õ±°¥ô(€€€€€€€½¹M…Ù”õì¡Ý½É­½ÕÐ¤€ôøì(€€€€€€€€€½¹UÁ‘…Ñ•]½É­½ÕÐ¡Ý½É­½ÕÐ¤ì(€€€€€€€€€Í•Ñ‘¥Ñ¥¹]½É­½ÕÐ¡¹Õ±°¤ì(€€€€€€€õô(€€€€€€¼ùô(€€€€ð½‘¥Øø(€€¤ì)ô()™Õ¹Ñ¥½¸]½É­½ÕÑ½ÉÉ•Ñ¥½¹¥…±½œ¡ìÝ½É­½ÕÐ°½¹±½Í”°½¹M…Ù”ôèìÝ½É­½ÕÐè]½É­½ÕÑMÕµµ…Éäì½¹±½Í”è€ ¤€ôøÙ½¥ì½¹M…Ù”è€¡Ý½É­½ÕÐè]½É­½ÕÑMÕµµ…Éä¤€ôøÙ½¥ô¤ì(€½¹ÍÐ‘¥…±½I•˜€ôÕÍ•5½‘…±ÄÅäñ!Q51½Éµ±•µ•¹Ðø¡½¹±½Í”¤ì(€½¹ÍÐmÑ¥Ñ±”°Í•ÑQ¥Ñ±•t€ôÕÍ•MÑ…Ñ”¡Ý½É­½ÕÐ¹Ñ¥Ñ±”¤ì(€½¹ÍÐm½µÁ±•Ñ•‘Ð°Í•Ñ½µÁ±•Ñ•‘Ñt€ôÕÍ•MÑ…Ñ”¡±½…±…Ñ•Q¥µ•Y…±Õ”¡Ý½É­½ÕÐ¹½µÁ±•Ñ•‘Ð¤¤ì(€½¹ÍÐm‘ÕÉ…Ñ¥½¹5¥¹ÕÑ•Ì°Í•ÑÕÉ…Ñ¥½¹5¥¹ÕÑ•Ít€ôÕÍ•MÑ…Ñ”¡5…Ñ ¹µ…à Ä°5…Ñ ¹É½Õ¹¡Ý½É­½ÕÐ¹‘ÕÉ…Ñ¥½¹M•½¹‘Ì€¼€ØÀ¤¤¤ì(€½¹ÍÐmÑ½Ñ…±M•ÑÌ°Í•ÑQ½Ñ…±M•ÑÍt€ôÕÍ•MÑ…Ñ”¡Ý½É­½ÕÐ¹Ñ½Ñ…±M•ÑÌ¤ì(€½¹ÍÐm¹½Ñ”°Í•Ñ9½Ñ•t€ôÕÍ•MÑ…Ñ”¡Ý½É­½ÕÐ¹¹½Ñ”¤ì(€½¹ÍÐmÍ•ÑÌ°Í•ÑM•ÑÍt€ôÕÍ•MÑ…Ñ”¡Ý½É­½ÕÐ¹Í•ÑÌ¤ì((€™Õ¹Ñ¥½¸¡…¹•M•Ð¡¥¹‘•àè¹Õµ‰•È°­•äè€‰­œˆð€‰É•ÁÌˆð€‰É¥Èˆ°Ù…±Õ”è¹Õµ‰•È¤ì(€€€Í•ÑM•ÑÌ ¡ÕÉÉ•¹Ð¤€ôøÕÉÉ•¹Ð¹µ…À ¡Í•Ð°Í•Ñ%¹‘•à¤€ôøÍ•Ñ%¹‘•à€ôôô¥¹‘•à€üì€¸¸¹Í•Ð°m­•åtèÙ…±Õ”ô€èÍ•Ð¤¤ì(€ô((€™Õ¹Ñ¥½¸ÍÕ‰µ¥Ð¡•Ù•¹Ðè½ÉµÙ•¹Ðñ!Q51½Éµ±•µ•¹Ðø¤ì(€€€•Ù•¹Ð¹ÁÉ•Ù•¹Ñ•™…Õ±Ð ¤ì(€€€½¹ÍÐÑ¥µ•ÍÑ…µÀ€ô¹•Ü…Ñ”¡½µÁ±•Ñ•‘Ð¤¹•ÑQ¥µ” ¤ì(€€€¥˜€ …9Õµ‰•È¹¥Í¥¹¥Ñ”¡Ñ¥µ•ÍÑ…µÀ¤ñð€…Í•ÑÌ¹±•¹Ñ ¤É•ÑÕÉ¸ì(€€€½¹ÍÐ¹½Éµ…±¥é•‘M•ÑÌ€ôÍ•ÑÌ¹µ…À ¡Í•Ð°¥¹‘•à¤€ôø€¡ì€¸¸¹Í•Ð°Á½Í¥Ñ¥½¸è¥¹‘•àô¤¤ì(€€€½¹ÍÐÙ½±Õµ”€ô¹½Éµ…±¥é•‘M•ÑÌ¹É•‘Õ” ¡Ñ½Ñ…°°Í•Ð¤€ôøÑ½Ñ…°€¬Í•Ð¹­œ€¨Í•Ð¹É•ÁÌ°€À¤ì(€€€½¹ÍÐ…Ù•É…•I¥È€ô¹½Éµ…±¥é•‘M•ÑÌ¹É•‘Õ” ¡Ñ½Ñ…°°Í•Ð¤€ôøÑ½Ñ…°€¬Í•Ð¹É¥È°€À¤€¼¹½Éµ…±¥é•‘M•ÑÌ¹±•¹Ñ ì(€€€½¹ÍÐ‰•ÍÐ€ôl¸¸¹¹½Éµ…±¥é•‘M•ÑÍt¹Í½ÉÐ ¡„°ˆ¤€ôøˆ¹­œ€¨ˆ¹É•ÁÌ€´„¹­œ€¨„¹É•ÁÌ¥lÁtì(€€€½¹M…Ù”¡ì(€€€€€€¸¸¹Ý½É­½ÕÐ°(€€€€€Ñ¥Ñ±”èÑ¥Ñ±”¹ÑÉ¥´ ¤°(€€€€€½µÁ±•Ñ•‘ÐèÑ¥µ•ÍÑ…µÀ°(€€€€€‘ÕÉ…Ñ¥½¹M•½¹‘Ìè5…Ñ ¹É½Õ¹¡‘ÕÉ…Ñ¥½¹5¥¹ÕÑ•Ì€¨€ØÀ¤°(€€€€€½µÁ±•Ñ•‘M•ÑÌè¹½Éµ…±¥é•‘M•ÑÌ¹±•¹Ñ °(€€€€€Ñ½Ñ…±M•ÑÌè5…Ñ ¹µ…à¡¹½Éµ…±¥é•‘M•ÑÌ¹±•¹Ñ °5…Ñ ¹É½Õ¹¡Ñ½Ñ…±M•ÑÌ¤¤°(€€€€€•á•É¥Í•½Õ¹Ðè¹•ÜM•Ð¡¹½Éµ…±¥é•‘M•ÑÌ¹µ…À ¡Í•Ð¤€ôøÍ•Ð¹•á•É¥Í•%¤¤¹Í¥é”°(€€€€€Ù½±Õµ”è5…Ñ ¹É½Õ¹¡Ù½±Õµ”¤°(€€€€€…Ù•É…•I¥È°(€€€€€‰•ÍÑM•Ðè€‘í‰•ÍÐ¹•á•É¥Í•9…µ•ôƒ
+Ü€‘í‰•ÍÐ¹­ô­œƒ\€‘í‰•ÍÐ¹É•ÁÍõ€°(€€€€€¹½Ñ”è¹½Ñ”¹ÑÉ¥´ ¤°(€€€€€Í•ÑÌè¹½Éµ…±¥é•‘M•ÑÌ°(€€€ô¤ì(€ô((€É•ÑÕÉ¸€ñ‘¥Ø±…ÍÍ9…µ”ô‰µ½‘…°µ±…å•Èˆ½¹5½ÕÍ•½Ý¸õì¡•Ù•¹Ð¤€ôø•Ù•¹Ð¹Ñ…É•Ð€ôôô•Ù•¹Ð¹ÕÉÉ•¹ÑQ…É•Ð€˜˜½¹±½Í” ¥ôø(€€€€ñ™½É´É•˜õí‘¥…±½I•™ô±…ÍÍ9…µ”ô‰Ý½É­½ÕÐµ½ÉÉ•Ñ¥½¸ˆÉ½±”ô‰‘¥…±½œˆ…É¥„µµ½‘…°ô‰ÑÉÕ”ˆ…É¥„µ±…‰•±±•‘‰äô‰Ý½É­½ÕÐµ½ÉÉ•Ñ¥½¸µÑ¥Ñ±”ˆ½¹MÕ‰µ¥ÐõíÍÕ‰µ¥Ñôø(€€€€€€ñ¡•…‘•Èøñ‘¥ØøñÀ±…ÍÍ9…µ”ô‰•å•‰É½Ü¡½Ðˆù½ÉÉ•ÐÉ•½Éð½Àøñ È¥ô‰Ý½É­½ÕÐµ½ÉÉ•Ñ¥½¸µÑ¥Ñ±”ˆù‘¥Ð½µÁ±•Ñ•Ý½É­½ÕÐð½ Èøð½‘¥Øøñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ½¹±¥¬õí½¹±½Í•ô…É¥„µ±…‰•°ô‰±½Í”Ý½É­½ÕÐ½ÉÉ•Ñ¥½¸ˆû\ð½‰ÕÑÑ½¸øð½¡•…‘•Èø(€€€€€€ñÀ±…ÍÍ9…µ”ô‰½ÉÉ•Ñ¥½¸µ¹½Ñ”ˆùQ¡”Ý½É­½ÕÐ­••ÁÌ¥ÑÌ½É¥¥¹…°¥‘•¹Ñ¥Ñä¸Y½±Õµ”°•™™½ÉÐ…¹‰•ÍÐÍ•Ð…É”É•…±Õ±…Ñ•™É½´Ñ¡”½ÉÉ•Ñ•Í•ÑÌ¸ð½Àø(€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰Ý½É­½ÕÐµ½ÉÉ•Ñ¥½¸µµ•Ñ„ˆø(€€€€€€€€ñ±…‰•°ù]½É­½ÕÐ¹…µ”ñ¥¹ÁÕÐÙ…±Õ”õíÑ¥Ñ±•ôµ…á1•¹Ñ õìÄÈÁô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÍ•ÑQ¥Ñ±”¡•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”¥ôÉ•ÅÕ¥É•€¼øð½±…‰•°ø(€€€€€€€€ñ±…‰•°ù…Ñ”…¹Ñ¥µ”ñ¥¹ÁÕÐÑåÁ”ô‰‘…Ñ•Ñ¥µ”µ±½…°ˆÙ…±Õ”õí½µÁ±•Ñ•‘Ñô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÍ•Ñ½µÁ±•Ñ•‘Ð¡•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”¥ôÉ•ÅÕ¥É•€¼øð½±…‰•°ø(€€€€€€€€ñ±…‰•°ùÕÉ…Ñ¥½¸€¡µ¥¸¤ñ¥¹ÁÕÐÑåÁ”ô‰¹Õµ‰•Èˆµ¥¸ôˆÄˆµ…àôˆÈààÀˆÙ…±Õ”õí‘ÕÉ…Ñ¥½¹5¥¹ÕÑ•Íô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÍ•ÑÕÉ…Ñ¥½¹5¥¹ÕÑ•Ì¡5…Ñ ¹µ…à Ä°9Õµ‰•È¡•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”¤¤¥ôÉ•ÅÕ¥É•€¼øð½±…‰•°ø(€€€€€€€€ñ±…‰•°ùA±…¹¹•Í•ÑÌñ¥¹ÁÕÐÑåÁ”ô‰¹Õµ‰•Èˆµ¥¸õíÍ•ÑÌ¹±•¹Ñ ñð€Åôµ…àôˆÄÀÀÀˆÙ…±Õ”õí5…Ñ ¹µ…à¡Ñ½Ñ…±M•ÑÌ°Í•ÑÌ¹±•¹Ñ ¥ô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÍ•ÑQ½Ñ…±M•ÑÌ¡5…Ñ ¹µ…à¡Í•ÑÌ¹±•¹Ñ °9Õµ‰•È¡•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”¤¤¥ôÉ•ÅÕ¥É•€¼øð½±…‰•°ø(€€€€€€ð½‘¥Øø(€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰Ý½É­½ÕÐµ½ÉÉ•Ñ¥½¸µÍ•ÑÌˆø(€€€€€€€€ñ¡•…‘•ÈøñÍÁ…¸ù½µÁ±•Ñ•Í•ÑÌð½ÍÁ…¸øñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ½¹±¥¬õì ¤€ôøì(€€€€€€€€€½¹ÍÐÍ½ÕÉ”€ôÍ•ÑÍmÍ•ÑÌ¹±•¹Ñ €´€Åt€üüÝ½É­½ÕÐ¹Í•ÑÍlÁtì(€€€€€€€€€¥˜€ …Í½ÕÉ”ñðÍ•ÑÌ¹±•¹Ñ €øô€ÄÀÀ¤É•ÑÕÉ¸ì(€€€€€€€€€Í•ÑM•ÑÌ ¡ÕÉÉ•¹Ð¤€ôøl¸¸¹ÕÉÉ•¹Ð°ì€¸¸¹Í½ÕÉ”°¥èÉåÁÑ¼¹É…¹‘½µUU% ¤°Á½Í¥Ñ¥½¸èÕÉÉ•¹Ð¹±•¹Ñ õt¤ì(€€€€€€€õôù‘Í•Ðð½‰ÕÑÑ½¸øð½¡•…‘•Èø(€€€€€€€íÍ•ÑÌ¹µ…À ¡Í•Ð°¥¹‘•à¤€ôø€ñ‘¥Ø­•äõíÍ•Ð¹¥‘ôø(€€€€€€€€€€ñÍÁ…¸øñÍµ…±°ùíMÑÉ¥¹œ¡¥¹‘•à€¬€Ä¤¹Á…‘MÑ…ÉÐ È°€ˆÀˆ¥ôð½Íµ…±°øñÍÑÉ½¹œùíÍ•Ð¹•á•É¥Í•9…µ•ôð½ÍÑÉ½¹œøð½ÍÁ…¸ø(€€€€€€€€€€ñ±…‰•°ù­œñ¥¹ÁÕÐÑåÁ”ô‰¹Õµ‰•Èˆµ¥¸ôˆÀˆµ…àôˆÄÀÀÀˆÍÑ•ÀôˆÀ¸ÔˆÙ…±Õ”õíÍ•Ð¹­ô½¹¡…¹”õì¡•Ù•¹Ð¤€ôø¡…¹•M•Ð¡¥¹‘•à°€‰­œˆ°5…Ñ ¹µ…à À°9Õµ‰•È¡•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”¤¤¥ô€¼øð½±…‰•°ø(€€€€€€€€€€ñ±…‰•°ùÉ•ÁÌñ¥¹ÁÕÐÑåÁ”ô‰¹Õµ‰•Èˆµ¥¸ôˆÄˆµ…àôˆÄÀÀÀˆÙ…±Õ”õíÍ•Ð¹É•ÁÍô½¹¡…¹”õì¡•Ù•¹Ð¤€ôø¡…¹•M•Ð¡¥¹‘•à°€‰É•ÁÌˆ°5…Ñ ¹µ…à Ä°9Õµ‰•È¡•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”¤¤¥ô€¼øð½±…‰•°ø(€€€€€€€€€€ñ±…‰•°ùÉ•ÁÌ±•™Ðñ¥¹ÁÕÐÑåÁ”ô‰¹Õµ‰•Èˆµ¥¸ôˆÀˆµ…àôˆÄÀˆÍÑ•ÀôˆÀ¸ÔˆÙ…±Õ”õíÍ•Ð¹É¥Éô½¹¡…¹”õì¡•Ù•¹Ð¤€ôø¡…¹•M•Ð¡¥¹‘•à°€‰É¥Èˆ°5…Ñ ¹µ…à À°5…Ñ ¹µ¥¸ ÄÀ°9Õµ‰•È¡•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”¤¤¤¥ô€¼øð½±…‰•°ø(€€€€€€€€€€ñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ…É¥„µ±…‰•°õíI•µ½Ù”Í•Ð€‘í¥¹‘•à€¬€Åõô‘¥Í…‰±•õíÍ•ÑÌ¹±•¹Ñ €ôôô€Åô½¹±¥¬õì ¤€ôøÍ•ÑM•ÑÌ ¡ÕÉÉ•¹Ð¤€ôøÕÉÉ•¹Ð¹™¥±Ñ•È ¡|°Í•Ñ%¹‘•à¤€ôøÍ•Ñ%¹‘•à€„ôô¥¹‘•à¤¥ôùI•µ½Ù”ð½‰ÕÑÑ½¸ø(€€€€€€€€ð½‘¥Øø¥ô(€€€€€€ð½‘¥Øø(€€€€€€ñ±…‰•°±…ÍÍ9…µ”ô‰Ý½É­½ÕÐµ¹½Ñ”ˆù]½É­½ÕÐ¹½Ñ”€ñÍµ…±°ù½ÁÑ¥½¹…°ð½Íµ…±°øñÑ•áÑ…É•„µ…á1•¹Ñ õìÈÀÀÁôÙ…±Õ”õí¹½Ñ•ô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÍ•Ñ9½Ñ”¡•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”¥ô€¼øð½±…‰•°ø(€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰½ÉÉ•Ñ¥½¸µ…Ñ¥½¹Ìˆøñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ±…ÍÍ9…µ”ô‰½ÕÑ±¥¹”µ…Ñ¥½¸ˆ½¹±¥¬õí½¹±½Í•ôù…¹•°ð½‰ÕÑÑ½¸øñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰ÁÉ¥µ…Éäµ…Ñ¥½¸ˆÑåÁ”ô‰ÍÕ‰µ¥ÐˆùM…Ù”½ÉÉ•Ñ¥½¸€ñÍÁ…¸ûŠHð½ÍÁ…¸øð½‰ÕÑÑ½¸øð½‘¥Øø(€€€€ð½™½É´ø(€€ð½‘¥Øøì)ô()™Õ¹Ñ¥½¸MÉ••¹!•…‘¥¹œ¡ì•å•‰É½Ü°Ñ¥Ñ±”°½Áä°…Ñ¥½¸ôèì•å•‰É½ÜèÍÑÉ¥¹œìÑ¥Ñ±”èÍÑÉ¥¹œì½ÁäèÍÑÉ¥¹œì…Ñ¥½¸üèI•…Ð¹I•…Ñ9½‘”ô¤ì(€É•ÑÕÉ¸€ñ¡•…‘•È±…ÍÍ9…µ”ô‰ÍÉ••¸µ¡•…‘¥¹œˆøñ‘¥ØøñÀ±…ÍÍ9…µ”ô‰•å•‰É½Üˆùí•å•‰É½Ýôð½Àøñ ÄùíÑ¥Ñ±•ôð½ ÄøñÍÁ…¸ùí½Áåôð½ÍÁ…¸øð½‘¥Øùí…Ñ¥½¹ôð½¡•…‘•Èøì)ô()™Õ¹Ñ¥½¸½µµ…¹‘A…±•ÑÑ”¡ì½¹±½Í”°¼°ÍÑ…ÉÑ]½É­½ÕÐ°…‘‘]…Ñ•Èôèì½¹±½Í”è€ ¤€ôøÙ½¥ì¼è€¡ÍÉ••¸èMÉ••¸¤€ôøÙ½¥ìÍÑ…ÉÑ]½É­½ÕÐè€ ¤€ôøÙ½¥ì…‘‘]…Ñ•Èè€ ¤€ôøÙ½¥ô¤ì(€½¹ÍÐ‘¥…±½I•˜€ôÕÍ•5½‘…±ÄÅäñ!Q51±•µ•¹Ðø¡½¹±½Í”¤ì((€É•ÑÕÉ¸€ñ‘¥Ø±…ÍÍ9…µ”ô‰µ½‘…°µ±…å•Èˆ½¹5½ÕÍ•½Ý¸õì¡•Ù•¹Ð¤€ôø•Ù•¹Ð¹Ñ…É•Ð€ôôô•Ù•¹Ð¹ÕÉÉ•¹ÑQ…É•Ð€˜˜½¹±½Í” ¥ôø(€€€€ñÍ•Ñ¥½¸É•˜õí‘¥…±½I•™ô±…ÍÍ9…µ”ô‰½µµ…¹µÁ…±•ÑÑ”ˆÉ½±”ô‰‘¥…±½œˆ…É¥„µµ½‘…°ô‰ÑÉÕ”ˆ…É¥„µ±…‰•±±•‘‰äô‰ÅÕ¥¬µ…Ñ¥½¹ÌµÑ¥Ñ±”ˆø(€€€€€€ñ¡•…‘•È±…ÍÍ9…µ”ô‰ÅÕ¥¬µ…Ñ¥½¹Ìµ¡•…ˆøñ‘¥ØøñÀùEÕ¥¬…Ñ¥½¹Ìð½ÀøñÍÑÉ½¹œ¥ô‰ÅÕ¥¬µ…Ñ¥½¹ÌµÑ¥Ñ±”ˆù]¡…Ð‘¼å½Ô¹••É¥¡Ð¹½Üüð½ÍÑÉ½¹œøð½‘¥Øøñ‰ÕÑÑ½¸½¹±¥¬õí½¹±½Í•ô…É¥„µ±…‰•°ô‰±½Í”ÅÕ¥¬…Ñ¥½¹Ìˆû\ð½‰ÕÑÑ½¸øð½¡•…‘•Èø(€€€€€€ñÀù¡½½Í”½¹”…Ñ¥½¸¸ð½Àø(€€€€€€ñ‰ÕÑÑ½¸½¹±¥¬õíÍÑ…ÉÑ]½É­½ÕÑôøñ¤ûŠ„ð½¤øñÍÁ…¸øñÍÑÉ½¹œùMÑ…ÉÐÑ½‘…ä™…Á½ÌíÌÝ½É­½ÕÐð½ÍÑÉ½¹œøñÍµ…±°ùMÑ…ÉÑ•ÈÁ±…¸ƒ
+Ü…‘©ÕÍÐ•Ù•ÉäÍ•ÐÑ¼å½Ôð½Íµ…±°øð½ÍÁ…¸øñˆûŠHð½ˆøð½‰ÕÑÑ½¸ø(€€€€€€ñ‰ÕÑÑ½¸½¹±¥¬õí…‘‘]…Ñ•Éôøñ¤ûŠ^Hð½¤øñÍÁ…¸øñÍÑÉ½¹œù1½œ€ÈÔÀµ°Ý…Ñ•Èð½ÍÑÉ½¹œøñÍµ…±°ù‘Ñ¼Ñ½‘…ä™…Á½ÌíÌ¡å‘É…Ñ¥½¸ð½Íµ…±°øð½ÍÁ…¸øñˆø¬ð½ˆøð½‰ÕÑÑ½¸ø(€€€€€€ñ‰ÕÑÑ½¸½¹±¥¬õì ¤€ôø¼ ‰Õ•°ˆ¥ôøñ¤ø¬ð½¤øñÍÁ…¸øñÍÑÉ½¹œù1½œ„µ•…°ð½ÍÑÉ½¹œøñÍµ…±°ù…±½É¥•Ì°ÁÉ½Ñ•¥¸…¹µ•…°‘•Ñ…¥±Ìð½Íµ…±°øð½ÍÁ…¸øñˆûŠHð½ˆøð½‰ÕÑÑ½¸ø(€€€€€€ñ‰ÕÑÑ½¸½¹±¥¬õì ¤€ôø¼ ‰½… ˆ¥ôøñ¤ûŠr˜ð½¤øñÍÁ…¸øñÍÑÉ½¹œùÍ¬½É”½… ð½ÍÑÉ½¹œøñÍµ…±°ùQÉ…¥¹¥¹œ°É•½Ù•Éä½È¹ÕÑÉ¥Ñ¥½¸ð½Íµ…±°øð½ÍÁ…¸øñˆûŠHð½ˆøð½‰ÕÑÑ½¸ø(€€€€ð½Í•Ñ¥½¸ø(€€ð½‘¥Øøì)ô()™Õ¹Ñ¥½¸5•…±¥…±½œ¡ì½¹±½Í”°½¹‘ôèì½¹±½Í”è€ ¤€ôøÙ½¥ì½¹‘è€¡µ•…°è=µ¥Ðñ5•…°°€‰¥ˆð€‰É•½É‘•‘Ðˆø¤€ôøÙ½¥ô¤ì(€½¹ÍÐ‘¥…±½I•˜€ôÕÍ•5½‘…±ÄÅäñ!Q51½Éµ±•µ•¹Ðø¡½¹±½Í”¤ì(€½¹ÍÐÁÉ•Í•ÑÌ€ôl(€€€ì±…‰•°è€‰	É•…­™…ÍÐˆ°¹…µ”è€‰Ì€˜µ¥±¬ˆ°‘•Ñ…¥°è€ˆÔ•Ìƒ
+Ü™É•Í µ¥±¬ˆ°­…°è€ØÐÀ°ÁÉ½Ñ•¥¸è€ÐØô°(€€€ì±…‰•°è€‰5…¥¸µ•…°ˆ°¹…µ”è€‰¡¥­•¸É¥”ˆ°‘•Ñ…¥°è€‰I¥”ƒ
+Ü¡¥­•¸‰É•…ÍÐƒ
+ÜÉ••¹Ìˆ°­…°è€ÜÈÀ°ÁÉ½Ñ•¥¸è€Ôàô°(€€€ì±…‰•°è€‰M¹…¬ˆ°¹…µ”è€‰e½ÕÉÐ€˜‰…¹…¹„ˆ°‘•Ñ…¥°è€‰e½ÕÉÐƒ
+Ü‰…¹…¹„ˆ°­…°è€ÈØÀ°ÁÉ½Ñ•¥¸è€ÄÈô°(€tì(€½¹ÍÐm‘É…™Ð°Í•ÑÉ…™Ñt€ôÕÍ•MÑ…Ñ”¡ìÑ¥µ”è€ˆÄäèÄÔˆ°¹…µ”è€ˆˆ°‘•Ñ…¥°è€ˆˆ°­…°è€À°ÁÉ½Ñ•¥¸è€Àô¤ì((€™Õ¹Ñ¥½¸ÍÕ‰µ¥Ð¡•Ù•¹Ðè½ÉµÙ•¹Ðñ!Q51½Éµ±•µ•¹Ðø¤ì(€€€•Ù•¹Ð¹ÁÉ•Ù•¹Ñ•™…Õ±Ð ¤ì(€€€½¹‘¡‘É…™Ð¤ì(€ô(€É•ÑÕÉ¸€ñ‘¥Ø±…ÍÍ9…µ”ô‰µ½‘…°µ±…å•Èˆ½¹5½ÕÍ•½Ý¸õì¡•Ù•¹Ð¤€ôø•Ù•¹Ð¹Ñ…É•Ð€ôôô•Ù•¹Ð¹ÕÉÉ•¹ÑQ…É•Ð€˜˜½¹±½Í” ¥ôø(€€€€ñ™½É´É•˜õí‘¥…±½I•™ô±…ÍÍ9…µ”ô‰µ•…°µ‘¥…±½œˆÉ½±”ô‰‘¥…±½œˆ…É¥„µµ½‘…°ô‰ÑÉÕ”ˆ…É¥„µ±…‰•±±•‘‰äô‰µ•…°µ‘¥…±½œµÑ¥Ñ±”ˆ½¹MÕ‰µ¥ÐõíÍÕ‰µ¥Ñôø(€€€€€€ñ¡•…‘•Èøñ‘¥ØøñÀ±…ÍÍ9…µ”ô‰•å•‰É½Ü¡½Ðˆù9ÕÑÉ¥Ñ¥½¸±½œð½Àøñ È¥ô‰µ•…°µ‘¥…±½œµÑ¥Ñ±”ˆù‘„µ•…°ð½ Èøð½‘¥Øøñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ½¹±¥¬õí½¹±½Í•ô…É¥„µ±…‰•°ô‰±½Í”µ•…°™½É´ˆû\ð½‰ÕÑÑ½¸øð½¡•…‘•Èø(€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰µ•…°µÁÉ•Í•ÑÌˆøñÍÁ…¸ùEÕ¥¬™¥±°ð½ÍÁ…¸øñ‘¥ØùíÁÉ•Í•ÑÌ¹µ…À ¡ÁÉ•Í•Ð¤€ôø€ñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ½¹±¥¬õì ¤€ôøÍ•ÑÉ…™Ð ¡ÕÉÉ•¹Ð¤€ôø€¡ì€¸¸¹ÕÉÉ•¹Ð°¹…µ”èÁÉ•Í•Ð¹¹…µ”°‘•Ñ…¥°èÁÉ•Í•Ð¹‘•Ñ…¥°°­…°èÁÉ•Í•Ð¹­…°°ÁÉ½Ñ•¥¸èÁÉ•Í•Ð¹ÁÉ½Ñ•¥¸ô¤¥ô­•äõíÁÉ•Í•Ð¹±…‰•±ôùíÁÉ•Í•Ð¹±…‰•±ôð½‰ÕÑÑ½¸ø¥ôð½‘¥Øøð½‘¥Øø(€€€€€€ñ±…‰•°ù5•…°¹…µ”ñ¥¹ÁÕÐ¹…µ”ô‰¹…µ”ˆÙ…±Õ”õí‘É…™Ð¹¹…µ•ô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÍ•ÑÉ…™Ð ¡ÕÉÉ•¹Ð¤€ôø€¡ì€¸¸¹ÕÉÉ•¹Ð°¹…µ”è•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”ô¤¥ôÁ±…•¡½±‘•Èô‰I•½Ù•Éä‘¥¹¹•ÈˆÉ•ÅÕ¥É•€¼øð½±…‰•°ø(€€€€€€ñ±…‰•°ù½½‘•Ñ…¥±Ì€ñÍµ…±°ù½ÁÑ¥½¹…°ð½Íµ…±°øñ¥¹ÁÕÐ¹…µ”ô‰‘•Ñ…¥°ˆÙ…±Õ”õí‘É…™Ð¹‘•Ñ…¥±ô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÍ•ÑÉ…™Ð ¡ÕÉÉ•¹Ð¤€ôø€¡ì€¸¸¹ÕÉÉ•¹Ð°‘•Ñ…¥°è•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”ô¤¥ôÁ±…•¡½±‘•Èô‰I¥”ƒ
+Ü¡¥­•¸ƒ
+ÜÉ••¹Ìˆ€¼øð½±…‰•°ø(€€€€€€ñ‘¥Øøñ±…‰•°ùQ¥µ”ñ¥¹ÁÕÐ¹…µ”ô‰Ñ¥µ”ˆÑåÁ”ô‰Ñ¥µ”ˆÙ…±Õ”õí‘É…™Ð¹Ñ¥µ•ô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÍ•ÑÉ…™Ð ¡ÕÉÉ•¹Ð¤€ôø€¡ì€¸¸¹ÕÉÉ•¹Ð°Ñ¥µ”è•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”ô¤¥ôÉ•ÅÕ¥É•€¼øð½±…‰•°øñ±…‰•°ù…±½É¥•Ìñ¥¹ÁÕÐ¹…µ”ô‰­…°ˆÑåÁ”ô‰¹Õµ‰•Èˆµ¥¸ôˆÀˆÙ…±Õ”õí‘É…™Ð¹­…°ñð€ˆ‰ô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÍ•ÑÉ…™Ð ¡ÕÉÉ•¹Ð¤€ôø€¡ì€¸¸¹ÕÉÉ•¹Ð°­…°è9Õµ‰•È¡•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”¤ô¤¥ôÉ•ÅÕ¥É•€¼øð½±…‰•°øñ±…‰•°ùAÉ½Ñ•¥¸€¡œ¤ñ¥¹ÁÕÐ¹…µ”ô‰ÁÉ½Ñ•¥¸ˆÑåÁ”ô‰¹Õµ‰•Èˆµ¥¸ôˆÀˆÙ…±Õ”õí‘É…™Ð¹ÁÉ½Ñ•¥¸ñð€ˆ‰ô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÍ•ÑÉ…™Ð ¡ÕÉÉ•¹Ð¤€ôø€¡ì€¸¸¹ÕÉÉ•¹Ð°ÁÉ½Ñ•¥¸è9Õµ‰•È¡•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”¤ô¤¥ôÉ•ÅÕ¥É•€¼øð½±…‰•°øð½‘¥Øø(€€€€€€ñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰ÁÉ¥µ…Éäµ…Ñ¥½¸ˆÑåÁ”ô‰ÍÕ‰µ¥Ðˆù‘Ñ¼Ñ½‘…ä€ñÍÁ…¸ûŠHð½ÍÁ…¸øð½‰ÕÑÑ½¸ø(€€€€ð½™½É´ø(€€ð½‘¥Øøì)ô()™Õ¹Ñ¥½¸±½…±…Ñ•Q¥µ•Y…±Õ”¡Ñ¥µ•ÍÑ…µÀè¹Õµ‰•È¤ì(€½¹ÍÐ‘…Ñ”€ô¹•Ü…Ñ”¡Ñ¥µ•ÍÑ…µÀ¤ì(€½¹ÍÐ½™™Í•Ð€ô‘…Ñ”¹•ÑQ¥µ•é½¹•=™™Í•Ð ¤€¨€ØÁ|ÀÀÀì(€É•ÑÕÉ¸¹•Ü…Ñ”¡Ñ¥µ•ÍÑ…µÀ€´½™™Í•Ð¤¹Ñ½%M=MÑÉ¥¹œ ¤¹Í±¥” À°€ÄØ¤ì)ô()™Õ¹Ñ¥½¸5•…±½ÉÉ•Ñ¥½¹¥…±½œ¡ìµ•…°°½¹±½Í”°½¹M…Ù”ôèìµ•…°è5•…°ì½¹±½Í”è€ ¤€ôøÙ½¥ì½¹M…Ù”è€¡µ•…°è5•…°¤€ôøÙ½¥ô¤ì(€½¹ÍÐ‘¥…±½I•˜€ôÕÍ•5½‘…±ÄÅäñ!Q51½Éµ±•µ•¹Ðø¡½¹±½Í”¤ì(€½¹ÍÐm‘É…™Ð°Í•ÑÉ…™Ñt€ôÕÍ•MÑ…Ñ”¡ì(€€€É•½É‘•‘Ðè±½…±…Ñ•Q¥µ•Y…±Õ”¡µ•…°¹É•½É‘•‘Ð¤°(€€€Ñ¥µ”èµ•…°¹Ñ¥µ”°(€€€¹…µ”èµ•…°¹¹…µ”°(€€€‘•Ñ…¥°èµ•…°¹‘•Ñ…¥°°(€€€­…°èµ•…°¹­…°°(€€€ÁÉ½Ñ•¥¸èµ•…°¹ÁÉ½Ñ•¥¸°(€ô¤ì((€™Õ¹Ñ¥½¸ÍÕ‰µ¥Ð¡•Ù•¹Ðè½ÉµÙ•¹Ðñ!Q51½Éµ±•µ•¹Ðø¤ì(€€€•Ù•¹Ð¹ÁÉ•Ù•¹Ñ•™…Õ±Ð ¤ì(€€€½¹ÍÐÉ•½É‘•‘Ð€ô¹•Ü…Ñ”¡‘É…™Ð¹É•½É‘•‘Ð¤¹•ÑQ¥µ” ¤ì(€€€¥˜€ …9Õµ‰•È¹¥Í¥¹¥Ñ”¡É•½É‘•‘Ð¤¤É•ÑÕÉ¸ì(€€€½¹M…Ù”¡ì€¸¸¹µ•…°°€¸¸¹‘É…™Ð°É•½É‘•‘Ðô¤ì(€ô((€É•ÑÕÉ¸€ñ‘¥Ø±…ÍÍ9…µ”ô‰µ½‘…°µ±…å•Èˆ½¹5½ÕÍ•½Ý¸õì¡•Ù•¹Ð¤€ôø•Ù•¹Ð¹Ñ…É•Ð€ôôô•Ù•¹Ð¹ÕÉÉ•¹ÑQ…É•Ð€˜˜½¹±½Í” ¥ôø(€€€€ñ™½É´É•˜õí‘¥…±½I•™ô±…ÍÍ9…µ”ô‰µ•…°µ‘¥…±½œ½ÉÉ•Ñ¥½¸µ‘¥…±½œˆÉ½±”ô‰‘¥…±½œˆ…É¥„µµ½‘…°ô‰ÑÉÕ”ˆ…É¥„µ±…‰•±±•‘‰äô‰µ•…°µ½ÉÉ•Ñ¥½¸µÑ¥Ñ±”ˆ½¹MÕ‰µ¥ÐõíÍÕ‰µ¥Ñôø(€€€€€€ñ¡•…‘•Èøñ‘¥ØøñÀ±…ÍÍ9…µ”ô‰•å•‰É½Ü¡½Ðˆù½ÉÉ•ÐÉ•½Éð½Àøñ È¥ô‰µ•…°µ½ÉÉ•Ñ¥½¸µÑ¥Ñ±”ˆù‘¥Ðµ•…°ð½ Èøð½‘¥Øøñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ½¹±¥¬õí½¹±½Í•ô…É¥„µ±…‰•°ô‰±½Í”µ•…°½ÉÉ•Ñ¥½¸ˆû\ð½‰ÕÑÑ½¸øð½¡•…‘•Èø(€€€€€€ñÀ±…ÍÍ9…µ”ô‰½ÉÉ•Ñ¥½¸µ¹½Ñ”ˆùQ¡¥ÌÕÁ‘…Ñ•ÌÑ¡”Í…µ”Í…Ù•É•½É…¹µ…É­ÌÝ¡•¸¥ÐÝ…Ì½ÉÉ•Ñ•¸ð½Àø(€€€€€€ñ±…‰•°ù5•…°¹…µ”ñ¥¹ÁÕÐÙ…±Õ”õí‘É…™Ð¹¹…µ•ôµ…á1•¹Ñ õìÄÈÁô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÍ•ÑÉ…™Ð ¡ÕÉÉ•¹Ð¤€ôø€¡ì€¸¸¹ÕÉÉ•¹Ð°¹…µ”è•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”ô¤¥ôÉ•ÅÕ¥É•€¼øð½±…‰•°ø(€€€€€€ñ±…‰•°ù½½‘•Ñ…¥±Ì€ñÍµ…±°ù½ÁÑ¥½¹…°ð½Íµ…±°øñ¥¹ÁÕÐÙ…±Õ”õí‘É…™Ð¹‘•Ñ…¥±ôµ…á1•¹Ñ õìÌÀÁô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÍ•ÑÉ…™Ð ¡ÕÉÉ•¹Ð¤€ôø€¡ì€¸¸¹ÕÉÉ•¹Ð°‘•Ñ…¥°è•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”ô¤¥ô€¼øð½±…‰•°ø(€€€€€€ñ‘¥Øøñ±…‰•°ù…Ñ”…¹Ñ¥µ”ñ¥¹ÁÕÐÑåÁ”ô‰‘…Ñ•Ñ¥µ”µ±½…°ˆÙ…±Õ”õí‘É…™Ð¹É•½É‘•‘Ñô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøì(€€€€€€€½¹ÍÐ¹•áÐ€ô•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”ì(€€€€€€€Í•ÑÉ…™Ð ¡ÕÉÉ•¹Ð¤€ôø€¡ì€¸¸¹ÕÉÉ•¹Ð°É•½É‘•‘Ðè¹•áÐ°Ñ¥µ”è¹•áÐ¹Í±¥” ÄÄ°€ÄØ¤ô¤¤ì(€€€€€õôÉ•ÅÕ¥É•€¼øð½±…‰•°øñ±…‰•°ù…±½É¥•Ìñ¥¹ÁÕÐÑåÁ”ô‰¹Õµ‰•Èˆµ¥¸ôˆÀˆµ…àôˆÈÀÀÀÀˆÙ…±Õ”õí‘É…™Ð¹­…±ô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÍ•ÑÉ…™Ð ¡ÕÉÉ•¹Ð¤€ôø€¡ì€¸¸¹ÕÉÉ•¹Ð°­…°è9Õµ‰•È¡•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”¤ô¤¥ôÉ•ÅÕ¥É•€¼øð½±…‰•°øñ±…‰•°ùAÉ½Ñ•¥¸€¡œ¤ñ¥¹ÁÕÐÑåÁ”ô‰¹Õµ‰•Èˆµ¥¸ôˆÀˆµ…àôˆÈÀÀÀˆÙ…±Õ”õí‘É…™Ð¹ÁÉ½Ñ•¥¹ô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÍ•ÑÉ…™Ð ¡ÕÉÉ•¹Ð¤€ôø€¡ì€¸¸¹ÕÉÉ•¹Ð°ÁÉ½Ñ•¥¸è9Õµ‰•È¡•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”¤ô¤¥ôÉ•ÅÕ¥É•€¼øð½±…‰•°øð½‘¥Øø(€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰½ÉÉ•Ñ¥½¸µ…Ñ¥½¹Ìˆøñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ±…ÍÍ9…µ”ô‰½ÕÑ±¥¹”µ…Ñ¥½¸ˆ½¹±¥¬õí½¹±½Í•ôù…¹•°ð½‰ÕÑÑ½¸øñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰ÁÉ¥µ…Éäµ…Ñ¥½¸ˆÑåÁ”ô‰ÍÕ‰µ¥ÐˆùM…Ù”½ÉÉ•Ñ¥½¸€ñÍÁ…¸ûŠHð½ÍÁ…¸øð½‰ÕÑÑ½¸øð½‘¥Øø(€€€€ð½™½É´ø(€€ð½‘¥Øøì)ô()™Õ¹Ñ¥½¸!å‘É…Ñ¥½¹½ÉÉ•Ñ¥½¹¥…±½œ¡ì•¹ÑÉä°½¹±½Í”°½¹M…Ù”°½¹I•µ½Ù”ôèì•¹ÑÉäè!å‘É…Ñ¥½¹¹ÑÉäì½¹±½Í”è€ ¤€ôøÙ½¥ì½¹M…Ù”è€¡•¹ÑÉäè!å‘É…Ñ¥½¹¹ÑÉä¤€ôøÙ½¥ì½¹I•µ½Ù”è€ ¤€ôøÙ½¥ô¤ì(€½¹ÍÐ‘¥…±½I•˜€ôÕÍ•5½‘…±ÄÅäñ!Q51½Éµ±•µ•¹Ðø¡½¹±½Í”¤ì(€½¹ÍÐmÉ•½É‘•‘Ð°Í•ÑI•½É‘•‘Ñt€ôÕÍ•MÑ…Ñ”¡±½…±…Ñ•Q¥µ•Y…±Õ”¡•¹ÑÉä¹É•½É‘•‘Ð¤¤ì(€½¹ÍÐm‘¥É•Ñ¥½¸°Í•Ñ¥É•Ñ¥½¹t€ôÕÍ•MÑ…Ñ”ð‰…‘‘•ˆð€‰É•µ½Ù•ˆø¡•¹ÑÉä¹…µ½Õ¹Ñ5°€øô€À€ü€‰…‘‘•ˆ€è€‰É•µ½Ù•ˆ¤ì(€½¹ÍÐm…µ½Õ¹Ð°Í•Ñµ½Õ¹Ñt€ôÕÍ•MÑ…Ñ”¡5…Ñ ¹…‰Ì¡•¹ÑÉä¹…µ½Õ¹Ñ5°¤¤ì((€™Õ¹Ñ¥½¸ÍÕ‰µ¥Ð¡•Ù•¹Ðè½ÉµÙ•¹Ðñ!Q51½Éµ±•µ•¹Ðø¤ì(€€€•Ù•¹Ð¹ÁÉ•Ù•¹Ñ•™…Õ±Ð ¤ì(€€€½¹ÍÐÑ¥µ•ÍÑ…µÀ€ô¹•Ü…Ñ”¡É•½É‘•‘Ð¤¹•ÑQ¥µ” ¤ì(€€€¥˜€ …9Õµ‰•È¹¥Í¥¹¥Ñ”¡Ñ¥µ•ÍÑ…µÀ¤ñð…µ½Õ¹Ð€ð€Ä¤É•ÑÕÉ¸ì(€€€½¹M…Ù”¡ì€¸¸¹•¹ÑÉä°É•½É‘•‘ÐèÑ¥µ•ÍÑ…µÀ°…µ½Õ¹Ñ5°è‘¥É•Ñ¥½¸€ôôô€‰…‘‘•ˆ€ü…µ½Õ¹Ð€è€µ…µ½Õ¹Ðô¤ì(€ô((€É•ÑÕÉ¸€ñ‘¥Ø±…ÍÍ9…µ”ô‰µ½‘…°µ±…å•Èˆ½¹5½ÕÍ•½Ý¸õì¡•Ù•¹Ð¤€ôø•Ù•¹Ð¹Ñ…É•Ð€ôôô•Ù•¹Ð¹ÕÉÉ•¹ÑQ…É•Ð€˜˜½¹±½Í” ¥ôø(€€€€ñ™½É´É•˜õí‘¥…±½I•™ô±…ÍÍ9…µ”ô‰µ•…°µ‘¥…±½œ½ÉÉ•Ñ¥½¸µ‘¥…±½œ¡å‘É…Ñ¥½¸µ½ÉÉ•Ñ¥½¸ˆÉ½±”ô‰‘¥…±½œˆ…É¥„µµ½‘…°ô‰ÑÉÕ”ˆ…É¥„µ±…‰•±±•‘‰äô‰¡å‘É…Ñ¥½¸µ½ÉÉ•Ñ¥½¸µÑ¥Ñ±”ˆ½¹MÕ‰µ¥ÐõíÍÕ‰µ¥Ñôø(€€€€€€ñ¡•…‘•Èøñ‘¥ØøñÀ±…ÍÍ9…µ”ô‰•å•‰É½Ü¡½Ðˆù½ÉÉ•ÐÉ•½Éð½Àøñ È¥ô‰¡å‘É…Ñ¥½¸µ½ÉÉ•Ñ¥½¸µÑ¥Ñ±”ˆù‘¥ÐÝ…Ñ•È•¹ÑÉäð½ Èøð½‘¥Øøñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ½¹±¥¬õí½¹±½Í•ô…É¥„µ±…‰•°ô‰±½Í”Ý…Ñ•È½ÉÉ•Ñ¥½¸ˆû\ð½‰ÕÑÑ½¸øð½¡•…‘•Èø(€€€€€€ñÀ±…ÍÍ9…µ”ô‰½ÉÉ•Ñ¥½¸µ¹½Ñ”ˆùUÍ”ƒŠqÉ•µ½Ù•“Št½¹±äÝ¡•¸Ñ¡¥Ì•¹ÑÉäÝ…Ìµ•…¹ÐÑ¼½ÉÉ•Ð…¸•…É±¥•È½Ù•É½Õ¹Ð¸ð½Àø(€€€€€€ñ‘¥Øøñ±…‰•°ù¡…¹”ñÍ•±•ÐÙ…±Õ”õí‘¥É•Ñ¥½¹ô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÍ•Ñ¥É•Ñ¥½¸¡•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”…Ì€‰…‘‘•ˆð€‰É•µ½Ù•ˆ¥ôøñ½ÁÑ¥½¸Ù…±Õ”ô‰…‘‘•ˆù‘‘•ð½½ÁÑ¥½¸øñ½ÁÑ¥½¸Ù…±Õ”ô‰É•µ½Ù•ˆùI•µ½Ù•ð½½ÁÑ¥½¸øð½Í•±•Ðøð½±…‰•°øñ±…‰•°ùµ½Õ¹Ð€¡µ°¤ñ¥¹ÁÕÐÑåÁ”ô‰¹Õµ‰•Èˆµ¥¸ôˆÄˆµ…àôˆÌÈÀÀˆÙ…±Õ”õí…µ½Õ¹Ñô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÍ•Ñµ½Õ¹Ð¡5…Ñ ¹µ…à Ä°9Õµ‰•È¡•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”¤¤¥ôÉ•ÅÕ¥É•€¼øð½±…‰•°øñ±…‰•°ù…Ñ”…¹Ñ¥µ”ñ¥¹ÁÕÐÑåÁ”ô‰‘…Ñ•Ñ¥µ”µ±½…°ˆÙ…±Õ”õíÉ•½É‘•‘Ñô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÍ•ÑI•½É‘•‘Ð¡•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”¥ôÉ•ÅÕ¥É•€¼øð½±…‰•°øð½‘¥Øø(€€€€€€ñ‘¥Ø±…ÍÍ9…µ”ô‰½ÉÉ•Ñ¥½¸µ…Ñ¥½¹Ìˆøñ‰ÕÑÑ½¸ÑåÁ”ô‰‰ÕÑÑ½¸ˆ±…ÍÍ9…µ”ô‰É•½ÉµÉ•µ½Ù”µ…Ñ¥½¸ˆ½¹±¥¬õí½¹I•µ½Ù•ôùI•µ½Ù”•¹ÑÉäð½‰ÕÑÑ½¸øñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰ÁÉ¥µ…Éäµ…Ñ¥½¸ˆÑåÁ”ô‰ÍÕ‰µ¥ÐˆùM…Ù”½ÉÉ•Ñ¥½¸€ñÍÁ…¸ûŠHð½ÍÁ…¸øð½‰ÕÑÑ½¸øð½‘¥Øø(€€€€ð½™½É´ø(€€ð½‘¥Øøì)ô()™Õ¹Ñ¥½¸AÉ½™¥±•É…Ý•È¡ì(€ÁÉ½™¥±”°(€•µ…¥°°(€½¹±½Í”°(€½¹M…Ù”°(€½¹I•Á±…å1½¥¸°(€½¹I•Á±…å=¹‰½…É‘¥¹œ°(€½¹•±•Ñ•½Õ¹Ð°)ôèì(€ÁÉ½™¥±”è½É•AÉ½™¥±”ì(€•µ…¥°èÍÑÉ¥¹œì(€½¹±½Í”è€ ¤€ôøÙ½¥ì(€½¹M…Ù”è€¡ÁÉ½™¥±”è½É•AÉ½™¥±”¤€ôøÙ½¥ì(€½¹I•Á±…å1½¥¸è€ ¤€ôøÙ½¥ì(€½¹I•Á±…å=¹‰½…É‘¥¹œè€ ¤€ôøÙ½¥ì(€½¹•±•Ñ•½Õ¹Ðè€¡½¹™¥Éµ…Ñ¥½¸èÍÑÉ¥¹œ¤€ôøAÉ½µ¥Í”ñÙ½¥øì)ô¤ì(€½¹ÍÐm‘É…™Ð°Í•ÑÉ…™Ñt€ôÕÍ•MÑ…Ñ”¡ÁÉ½™¥±”¤ì(€½¹ÍÐm‘•±•Ñ¥¹œ°Í•Ñ•±•Ñ¥¹t€ôÕÍ•MÑ…Ñ”¡™…±Í”¤ì(€½¹ÍÐm‘•±•Ñ•=Á•¸°Í•Ñ•±•Ñ•=Á•¹t€ôÕÍ•MÑ…Ñ”¡™…±Í”¤ì(€½¹ÍÐm‘•±•Ñ•½¹™¥Éµ…Ñ¥½¸°Í•Ñ•±•Ñ•½¹™¥Éµ…Ñ¥½¹t€ôÕÍ•MÑ…Ñ” ˆˆ¤ì(€½¹ÍÐm‘•±•Ñ•ÉÉ½È°Í•Ñ•±•Ñ•ÉÉ½Ét€ôÕÍ•MÑ…Ñ” ˆˆ¤ì(€½¹ÍÐ‘¥ÍÁ±…å9…µ”€ô‘É…™Ð¹‘¥ÍÁ±…å9…µ”¹ÑÉ¥´ ¤ñð€‰Ñ¡±•Ñ”ˆì(€½¹ÍÐ‘É…Ý•ÉI•˜€ôÕÍ•5½‘…±ÄÅäñ!Q51±•µ•¹Ðø¡½¹±½Í”¤ì((€É•ÑÕÉ¸€ñ‘¥Ø±…ÍÍ9…µ”ô‰‘É…Ý•Èµ±…å•Èˆ½¹5½ÕÍ•½Ý¸õì¡•Ù•¹Ð¤€ôø•Ù•¹Ð¹Ñ…É•Ð€ôôô•Ù•¹Ð¹ÕÉÉ•¹ÑQ…É•Ð€˜˜½¹±½Í” ¥ôø(€€€€ñ…Í¥‘”É•˜õí‘É…Ý•ÉI•™ô±…ÍÍ9…µ”ô‰ÁÉ½™¥±”µ‘É…Ý•ÈˆÉ½±”ô‰‘¥…±½œˆ…É¥„µµ½‘…°ô‰ÑÉÕ”ˆ…É¥„µ±…‰•±±•‘‰äô‰ÁÉ½™¥±”µ‘É…Ý•ÈµÑ¥Ñ±”ˆø(€€€€€€ñ¡•…‘•Èøñ‘¥ØøñÍÁ…¸…É¥„µ¡¥‘‘•¸ô‰ÑÉÕ”ˆùí‘¥ÍÁ±…å9…µ”¹Í±¥” À°€Ä¤¹Ñ½UÁÁ•É…Í” ¥ôð½ÍÁ…¸øñÀøñÍÑÉ½¹œ¥ô‰ÁÉ½™¥±”µ‘É…Ý•ÈµÑ¥Ñ±”ˆùí‘¥ÍÁ±…å9…µ•ôð½ÍÑÉ½¹œøñÍµ…±°ùí•µ…¥°ñð€‰M¥¹•µ¥¸…Ñ¡±•Ñ”‰ôð½Íµ…±°øð½Àøð½‘¥Øøñ‰ÕÑÑ½¸½¹±¥¬õí½¹±½Í•ô…É¥„µ±…‰•°ô‰±½Í”ÁÉ½™¥±”ˆû\ð½‰ÕÑÑ½¸øð½¡•…‘•Èø(€€€€€€ñÍ•Ñ¥½¸±…ÍÍ9…µ”ô‰…½Õ¹ÐµÁÉ½™¥±”ˆøñÀ±…ÍÍ9…µ”ô‰•å•‰É½ÜˆùÑ¡±•Ñ”ÁÉ½™¥±”ð½Àøñ±…‰•°ù¥ÍÁ±…ä¹…µ”ñ¥¹ÁÕÐÙ…±Õ”õí‘É…™Ð¹‘¥ÍÁ±…å9…µ•ôµ…á1•¹Ñ õìàÁô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøÍ•ÑÉ…™Ð ¡ÕÉÉ•¹Ð¤€ôø€¡ì€¸¸¹ÕÉÉ•¹Ð°‘¥ÍÁ±…å9…µ”è•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”ô¤¥ôÁ±…•¡½±‘•Èô‰!½Ü=IÍ¡½Õ±…‘‘É•ÍÌå½Ôˆ€¼øð½±…‰•°øñ‘°øñ‘¥Øøñ‘Ðù½Õ¹Ðð½‘Ðøñ‘ùAÉ½Ñ•Ñ•ð½‘øð½‘¥Øøñ‘¥Øøñ‘ÐùA±…¸ð½‘Ðøñ‘ùÉ•”ð½‘øð½‘¥Øøñ‘¥Øøñ‘Ðù…Ñ„ð½‘Ðøñ‘ù½Õ¹ÐÍå¹•ð½‘øð½‘¥Øøð½‘°øð½Í•Ñ¥½¸ø(€€€€€€ñÍ•Ñ¥½¸øñÀ±…ÍÍ9…µ”ô‰•å•‰É½ÜˆùM…™•ÑäÁÉ•™•É•¹•Ìð½ÀøñÕ°øñ±¤ùMÑ½À½È…‘©ÕÍÐµ½Ù•µ•¹ÑÌÑ¡…Ð…ÕÍ”Á…¥¸¸ð½±¤øñ±¤ùAÉ½É•ÍÌ½¹±äÝ¥Ñ ±•…¸É…¹”½˜µ½Ñ¥½¸…¹½¹ÑÉ½°¸ð½±¤øñ±¤ùI•Ù¥•ÜÁ•ÉÍ¥ÍÑ•¹ÐÍåµÁÑ½µÌÝ¥Ñ „ÅÕ…±¥™¥•ÁÉ½™•ÍÍ¥½¹…°¸ð½±¤øð½Õ°øð½Í•Ñ¥½¸ø(€€€€€€ñÍ•Ñ¥½¸øñÀ±…ÍÍ9…µ”ô‰•å•‰É½ÜˆùAÉ•™•É•¹•Ìð½Àøñ‘¥Ø±…ÍÍ9…µ”ô‰ÁÉ•™•É•¹”ˆøñÍÁ…¸ùU¹¥ÑÌð½ÍÁ…¸øñ‘¥ØÉ½±”ô‰É½ÕÀˆ…É¥„µ±…‰•°ô‰5•…ÍÕÉ•µ•¹ÐÕ¹¥ÑÌˆùì¡l‰5•ÑÉ¥Œˆ°€‰%µÁ•É¥…°‰t…Ì½¹ÍÐ¤¹µ…À ¡¥Ñ•´¤€ôø€ñ‰ÕÑÑ½¸…É¥„µÁÉ•ÍÍ•õí‘É…™Ð¹Õ¹¥ÑÌ€ôôô¥Ñ•µô±…ÍÍ9…µ”õí‘É…™Ð¹Õ¹¥ÑÌ€ôôô¥Ñ•´€ü€‰…Ñ¥Ù”ˆ€è€ˆ‰ô½¹±¥¬õì ¤€ôøÍ•ÑÉ…™Ð ¡ÕÉÉ•¹Ð¤€ôø€¡ì€¸¸¹ÕÉÉ•¹Ð°Õ¹¥ÑÌè¥Ñ•´ô¤¥ô­•äõí¥Ñ•µôùí¥Ñ•µôð½‰ÕÑÑ½¸ø¥ôð½‘¥Øøð½‘¥Øøñ‘¥Ø±…ÍÍ9…µ”ô‰ÁÉ•™•É•¹”ˆøñÍÁ…¸ùM•ÍÍ¥½¸É•µ¥¹‘•ÉÌð½ÍÁ…¸øñ‰ÕÑÑ½¸…É¥„µ±…‰•°ô‰M•ÍÍ¥½¸É•µ¥¹‘•ÉÌˆ…É¥„µÁÉ•ÍÍ•õí‘É…™Ð¹¹½Ñ¥™¥…Ñ¥½¹Íô±…ÍÍ9…µ”õíÑ½±”€‘í‘É…™Ð¹¹½Ñ¥™¥…Ñ¥½¹Ì€ü€‰½¸ˆ€è€ˆ‰õô½¹±¥¬õì ¤€ôøÍ•ÑÉ…™Ð ¡ÕÉÉ•¹Ð¤€ôø€¡ì€¸¸¹ÕÉÉ•¹Ð°¹½Ñ¥™¥…Ñ¥½¹Ìè€…ÕÉÉ•¹Ð¹¹½Ñ¥™¥…Ñ¥½¹Ìô¤¥ôøñ¤€¼øð½‰ÕÑÑ½¸øð½‘¥Øøð½Í•Ñ¥½¸ø(€€€€€€ñÍ•Ñ¥½¸±…ÍÍ9…µ”ô‰‘•µ¼µÑ½½±Ìˆø(€€€€€€€€ñÀ±…ÍÍ9…µ”ô‰•å•‰É½Üˆù½Õ¹Ðð½Àø(€€€€€€€€ñ„¡É•˜ôˆ½…Á¤½É•½É‘Ìý™½Éµ…Ðõ•áÁ½ÉÐˆ‘½Ý¹±½…øñÍÁ…¸øñˆùáÁ½ÉÐµäÉ•½É‘Ìð½ˆøñÍµ…±°ù½Ý¹±½…Ý½É­½ÕÑÌ°µ•…±Ì…¹¡å‘É…Ñ¥½¸…Ì)M=8ð½Íµ…±°øð½ÍÁ…¸øñ¤ûŠLð½¤øð½„ø(€€€€€€€€ñ‰ÕÑÑ½¸½¹±¥¬õí½¹I•Á±…å1½¥¹ôøñÍÁ…¸øñˆùI•Á±…äÝ•±½µ”ð½ˆøñÍµ…±°ùI•Á±…äÑ¡”Í¡½ÉÐ¥¹•µ…Ñ¥Œð½Íµ…±°øð½ÍÁ…¸øñ¤ûŠ\ð½¤øð½‰ÕÑÑ½¸ø(€€€€€€€€ñ‰ÕÑÑ½¸½¹±¥¬õí½¹I•Á±…å=¹‰½…É‘¥¹ôøñÍÁ…¸øñˆùI•Ù¥•ÜÍ•ÑÕÀð½ˆøñÍµ…±°ùI•Ù¥•ÜÑ¡”Ñ¡É•”Í•ÑÕÀ¡½¥•Ìð½Íµ…±°øð½ÍÁ…¸øñ¤ûŠHð½¤øð½‰ÕÑÑ½¸ø(€€€€€€€€ñ„¡É•˜ôˆ½Í¥¹½ÕÐµÝ¥Ñ µ¡…ÑÁÐýÉ•ÑÕÉ¹}Ñ¼ô”ÉˆøñÍÁ…¸øñˆùM%8=UPð½ˆøñÍµ…±°ùM•ÕÉ•±ä•¹Ñ¡¥ÌÍ•ÍÍ¥½¸ð½Íµ…±°øð½ÍÁ…¸øñ¤ûŠHð½¤øð½„ø(€€€€€€ð½Í•Ñ¥½¸ø(€€€€€€ñÍ•Ñ¥½¸±…ÍÍ9…µ”ô‰…½Õ¹Ðµ‘…¹•Èˆø(€€€€€€€€ñÀ±…ÍÍ9…µ”ô‰•å•‰É½Üˆù•±•Ñ”…½Õ¹Ð‘…Ñ„ð½Àø(€€€€€€€ì…‘•±•Ñ•=Á•¸€ü€ñ‰ÕÑÑ½¸½¹±¥¬õì ¤€ôøÍ•Ñ•±•Ñ•=Á•¸¡ÑÉÕ”¥ôøñÍÁ…¸øñˆù•±•Ñ”µä=I…½Õ¹Ðð½ˆøñÍµ…±°ùA•Éµ…¹•¹Ñ±äÉ•µ½Ù”Ý½É­½ÕÑÌ°µ•…±Ì°¡å‘É…Ñ¥½¸…¹ÁÉ•™•É•¹•Ìð½Íµ…±°øð½ÍÁ…¸øñ¤ûŠHð½¤øð½‰ÕÑÑ½¸ø€è€ñ‘¥Ø±…ÍÍ9…µ”ô‰…½Õ¹Ðµ‘•±•Ñ”µ½¹™¥É´ˆø(€€€€€€€€€€ñÀùQ¡¥Ì…¹¹½Ð‰”Õ¹‘½¹”¸¹½¸µ¥‘•¹Ñ¥™å¥¹œÍ•ÕÉ¥Ñä•Ù•¹Ðµ…ä‰”É•Ñ…¥¹•¸ð½Àø(€€€€€€€€€€ñ±…‰•°ùQåÁ”€ñÍÑÉ½¹œù1Q=Ið½ÍÑÉ½¹œøÑ¼½¹™¥É´ñ¥¹ÁÕÐ…ÕÑ½½µÁ±•Ñ”ô‰½™˜ˆÍÁ•±±¡•¬õí™…±Í•ôÙ…±Õ”õí‘•±•Ñ•½¹™¥Éµ…Ñ¥½¹ô½¹¡…¹”õì¡•Ù•¹Ð¤€ôøì(€€€€€€€€€€€Í•Ñ•±•Ñ•½¹™¥Éµ…Ñ¥½¸¡•Ù•¹Ð¹Ñ…É•Ð¹Ù…±Õ”¤ì(€€€€€€€€€€€Í•Ñ•±•Ñ•ÉÉ½È ˆˆ¤ì(€€€€€€€€€õô€¼øð½±…‰•°ø(€€€€€€€€€í‘•±•Ñ•ÉÉ½È€˜˜€ñÀ±…ÍÍ9…µ”ô‰…½Õ¹Ðµ‘•±•Ñ”µ•ÉÉ½ÈˆÉ½±”ô‰…±•ÉÐˆùí‘•±•Ñ•ÉÉ½Éôð½Àùô(€€€€€€€€€€ñ‘¥Øøñ‰ÕÑÑ½¸‘¥Í…‰±•õí‘•±•Ñ¥¹ô½¹±¥¬õì ¤€ôøì(€€€€€€€€€€€Í•Ñ•±•Ñ•=Á•¸¡™…±Í”¤ì(€€€€€€€€€€€Í•Ñ•±•Ñ•½¹™¥Éµ…Ñ¥½¸ ˆˆ¤ì(€€€€€€€€€€€Í•Ñ•±•Ñ•ÉÉ½È ˆˆ¤ì(€€€€€€€€€õôù…¹•°ð½‰ÕÑÑ½¸øñ‰ÕÑÑ½¸‘¥Í…‰±•õí‘•±•Ñ¥¹œñð‘•±•Ñ•½¹™¥Éµ…Ñ¥½¸€„ôô€‰1Q=I‰ô½¹±¥¬õí…Íå¹Œ€ ¤€ôøì(€€€€€€€€€€€Í•Ñ•±•Ñ¥¹œ¡ÑÉÕ”¤ì(€€€€€€€€€€€Í•Ñ•±•Ñ•ÉÉ½È ˆˆ¤ì(€€€€€€€€€€€ÑÉäì(€€€€€€€€€€€€€…Ý…¥Ð½¹•±•Ñ•½Õ¹Ð¡‘•±•Ñ•½¹™¥Éµ…Ñ¥½¸¤ì(€€€€€€€€€€€ô…Ñ €¡•ÉÉ½È¤ì(€€€€€€€€€€€€€Í•Ñ•±•Ñ¥¹œ¡™…±Í”¤ì(€€€€€€€€€€€€€Í•Ñ•±•Ñ•ÉÉ½È¡•ÉÉ½È¥¹ÍÑ…¹•½˜ÉÉ½È€ü•ÉÉ½È¹µ•ÍÍ…”€è€‰=I½Õ±¹½Ð‘•±•Ñ”Ñ¡¥Ì…½Õ¹Ð¸ˆ¤ì(€€€€€€€€€€€ô(€€€€€€€€€õôùí‘•±•Ñ¥¹œ€ü€‰•±•Ñ¥¹ŸŠ˜ˆ€è€‰A•Éµ…¹•¹Ñ±ä‘•±•Ñ”‰ôð½‰ÕÑÑ½¸øð½‘¥Øø(€€€€€€€€ð½‘¥Øùô(€€€€€€ð½Í•Ñ¥½¸ø(€€€€€€ñ‰ÕÑÑ½¸±…ÍÍ9…µ”ô‰½ÕÑ±¥¹”µ…Ñ¥½¸‘É…Ý•ÈµÍ…Ù”ˆ‘¥Í…‰±•õì…‘É…™Ð¹‘¥ÍÁ±…å9…µ”¹ÑÉ¥´ ¥ô½¹±¥¬õì ¤€ôø½¹M…Ù”¡ì€¸¸¹‘É…™Ð°‘¥ÍÁ±…å9…µ”è‘É…™Ð¹‘¥ÍÁ±…å9…µ”¹ÑÉ¥´ ¤ô¥ôùM…Ù”ÁÉ•™•É•¹•Ìð½‰ÕÑÑ½¸ø(€€€€ð½…Í¥‘”ø(€€ð½‘¥Øøì)ô(

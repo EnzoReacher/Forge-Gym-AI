@@ -709,6 +709,20 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .demo-tools span b{font-size:11px}
 .demo-tools span small{margin-top:4px;color:var(--dim);font-size:9px}
 .demo-tools i{color:var(--bronze);font-style:normal}
+.account-danger>button{width:100%;min-height:58px;padding:0;border:0;border-top:1px solid var(--line);background:transparent;color:#d8afa6;display:flex;align-items:center;justify-content:space-between;cursor:pointer;text-align:left}
+.account-danger>button span b,.account-danger>button span small{display:block}
+.account-danger>button span b{font-size:11px}
+.account-danger>button span small{margin-top:4px;color:var(--dim);font-size:9px}
+.account-danger>button i{color:#ce5a45;font-style:normal}
+.account-delete-confirm{margin-top:14px;padding:14px;border:1px solid rgba(206,90,69,.34);background:rgba(87,24,15,.12)}
+.account-delete-confirm>p{margin:0;color:#c9aaa3;font-size:10px;line-height:1.55}
+.account-delete-confirm label{margin-top:14px}
+.account-delete-confirm label strong{color:#e9c7bf}
+.account-delete-confirm>div{margin-top:12px;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.account-delete-confirm>div button{min-height:44px;border:1px solid var(--line);background:transparent;color:var(--muted);font-size:9px;font-weight:750}
+.account-delete-confirm>div button:last-child{border-color:rgba(206,90,69,.45);background:rgba(124,31,20,.18);color:#f0c5bc}
+.account-delete-confirm>div button:disabled{cursor:not-allowed;opacity:.42}
+.account-delete-confirm .account-delete-error{margin-top:10px;color:#ef9a87}
 .drawer-save{width:100%;margin-top:22px}
 .toast,.sync-warning{
   position:fixed;

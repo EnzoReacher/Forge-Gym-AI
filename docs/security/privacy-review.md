@@ -21,9 +21,12 @@ schedule must be published before access is widened.
 
 ## User controls
 
-Athletes can view and correct their records, export account-owned records, and
-deliberately delete workouts and meals. Account deletion and formal retention
-timelines require a published policy before wider access.
+Athletes can view and correct their records, export account-owned records,
+deliberately delete individual records, and permanently delete an athlete
+account through an exact-confirmation flow. The deletion transaction removes
+account-owned training data and anonymizes the remaining account shell. A
+public privacy notice and final operational retention details remain release
+gates.
 
 ## Current safeguards and limits
 

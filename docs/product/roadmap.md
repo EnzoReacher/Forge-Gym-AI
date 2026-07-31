@@ -133,6 +133,9 @@ A redesigned screen does not ship until:
 - [x] Define incident response, evidence handling, recovery, notification, and
   closure criteria.
 - [x] Complete an internal data-minimization and privacy-control review.
+- [x] Add deliberate self-service athlete account deletion that atomically
+  purges account-owned data, removes direct identity, and preserves only a
+  non-identifying security audit marker.
 - [ ] Publish a user-facing privacy notice and final retention details before
   wider access.
 - [ ] Obtain an independent security review appropriate to the collected data.
