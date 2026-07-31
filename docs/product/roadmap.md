@@ -115,6 +115,9 @@ A redesigned screen does not ship until:
   record API failures, release health, latency, and elevated error rates.
 - [ ] Connect the alert policy to a hosted monitoring provider and verified
   primary and backup notification destinations.
+- [x] Add a privacy-safe production health probe and protected manual workflow;
+  keep scheduling disabled until credential and two-destination delivery tests
+  pass.
 - [ ] Establish automated encrypted backups and a protected retention policy.
 - [x] Add a reproducible disposable restore rehearsal that applies every
   migration, verifies checksums and table counts, and tests two-owner

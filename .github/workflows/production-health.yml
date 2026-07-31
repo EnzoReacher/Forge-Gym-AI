@@ -1,0 +1,25 @@
+name: Production health
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: forge-production-health
+  cancel-in-progress: false
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the verified source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Check production runtime and database
+        env:
+          FORGE_PRODUCTION_URL: ${{ secrets.FORGE_PRODUCTION_URL }}
+          FORGE_SITES_BYPASS_TOKEN: ${{ secrets.FORGE_SITES_BYPASS_TOKEN }}
+        run: node scripts/production-health-check.mjs

@@ -3,6 +3,11 @@
 Status: alert definitions complete; hosted alert delivery still requires a
 monitoring destination.
 
+The repository now includes a privacy-safe, manual production health workflow.
+It remains intentionally unscheduled until its protected Sites credential and
+both notification destinations pass the activation exercise documented in
+`hosted-health-activation.md`.
+
 FORGE emits fixed-shape operational events for account state, durable records,
 and release health. Events contain only the source, event name, outcome, HTTP
 status, duration, severity, signal, and a generated request ID. They never
