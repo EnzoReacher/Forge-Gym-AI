@@ -23,6 +23,7 @@ import {
   withMutationTimeout,
   writePendingMutations,
 } from "./record-mutation-queue.mjs";
+import { buildStarterWeek } from "./training-plan.mjs";
 
 type Screen = "Today" | "Train" | "Fuel" | "Coach" | "Progress";
 type TrainView = "Session" | "Week" | "Library";
@@ -294,16 +295,6 @@ const initialExercises: Exercise[] = [
   { id: "incline", name: "Incline dumbbell press", target: "Upper chest", cue: "Choose a comfortable load · use a pain-free range", sets: [{ kg: 0, reps: 8, done: false }, { kg: 0, reps: 8, done: false }, { kg: 0, reps: 8, done: false }] },
   { id: "row", name: "Chest-supported row", target: "Back", cue: "Choose a comfortable load · keep the movement controlled", sets: [{ kg: 0, reps: 10, done: false }, { kg: 0, reps: 10, done: false }, { kg: 0, reps: 10, done: false }] },
   { id: "shoulder", name: "Seated dumbbell press", target: "Shoulders", cue: "Choose a comfortable load · stop with 2 clean reps left", sets: [{ kg: 0, reps: 8, done: false }, { kg: 0, reps: 8, done: false }, { kg: 0, reps: 8, done: false }] },
-];
-
-const weekPlan = [
-  { day: "MON", date: "27", title: "Upper strength", focus: "Chest · Back", duration: "80 min", status: "today" },
-  { day: "TUE", date: "28", title: "Back width", focus: "Lats · Biceps", duration: "65 min", status: "next" },
-  { day: "WED", date: "29", title: "Chest control", focus: "Mid · Lower", duration: "60 min", status: "next" },
-  { day: "THU", date: "30", title: "Back thickness", focus: "Rows · Rear delts", duration: "70 min", status: "next" },
-  { day: "FRI", date: "31", title: "Shoulders & arms", focus: "Delts · Arms", duration: "60 min", status: "next" },
-  { day: "SAT", date: "01", title: "Recovery", focus: "Swim · Mobility", duration: "35 min", status: "rest" },
-  { day: "SUN", date: "02", title: "Full rest", focus: "Walk · Reset", duration: "—", status: "rest" },
 ];
 
 const exerciseLibrary: LibraryMove[] = [
@@ -1144,7 +1135,11 @@ export default function Home({
 
         <main className="workspace">
           {screen === "Today" && <Today athleteName={athleteName} exercises={exercises} meals={meals} water={water} workoutStarted={workoutStarted} lastWorkout={workoutHistory[0]} onStart={startWorkout} onCoach={() => go("Coach")} onProgress={() => go("Progress")} />}
-          {screen === "Train" && <Train exercises={exercises} setExercises={setExercises} started={workoutStarted} setStarted={setWorkoutStarted} startedAt={workoutStartedAt} setStartedAt={setWorkoutStartedAt} onFinish={finishWorkout} notify={setToast} />}
+          {screen === "Train" && <Train exercises={exercises} setExercises={setExercises} started={workoutStarted} setStarted={setWorkoutStarted} startedAt={workoutStartedAt} setStartedAt={setWorkoutStartedAt} onFinish={finishWorkout} notify={setToast} setup={{
+            trainingGoal: profile.trainingGoal ?? "Strength",
+            trainingDays: profile.trainingDays ?? "5 days",
+            coachStyle: profile.coachStyle ?? "Balanced",
+          }} />}
           {screen === "Fuel" && <Fuel
             meals={meals}
             hydration={hydration}
@@ -1329,6 +1324,7 @@ function Train({
   setStartedAt,
   onFinish,
   notify,
+  setup,
 }: {
   exercises: Exercise[];
   setExercises: React.Dispatch<React.SetStateAction<Exercise[]>>;
@@ -1338,6 +1334,7 @@ function Train({
   setStartedAt: React.Dispatch<React.SetStateAction<number>>;
   onFinish: (summary: WorkoutSummary) => void;
   notify: (message: string) => void;
+  setup: ForgeSetup;
 }) {
   const [view, setView] = useState<TrainView>("Session");
   const [libraryQuery, setLibraryQuery] = useState("");
@@ -1351,6 +1348,7 @@ function Train({
   const progress = Math.round(done.length / allSets.length * 100);
   const volume = done.reduce((total, set) => total + set.kg * set.reps, 0);
   const visibleLibrary = exerciseLibrary.filter((move) => `${move.target} ${move.name} ${move.role}`.toLowerCase().includes(libraryQuery.trim().toLowerCase()));
+  const weekPlan = buildStarterWeek(setup.trainingGoal, setup.trainingDays);
 
   useEffect(() => {
     if (!started || startedAt) return;
@@ -1546,8 +1544,8 @@ function Train({
       </div>}
 
       {view === "Week" && <section id="train-panel-week" className="week-board" role="tabpanel" aria-labelledby="train-tab-week">
-        <header><div><p className="eyebrow">Planning preview</p><h2>Example training week</h2><span className="honesty-note">This schedule is illustrative until weekly planning is connected to your account.</span></div><button className="outline-action" onClick={() => setView("Session")}>Open today&apos;s workout</button></header>
-        <div className="week-plan">{weekPlan.map((day) => <article className={day.status} key={day.day}><div><span>{day.day}</span><strong>{day.date}</strong></div><p><small>{day.status === "rest" ? "Recovery" : "Training"}</small><strong>{day.title}</strong><span>{day.focus}</span></p><b>{day.duration}</b></article>)}</div>
+        <header><div><p className="eyebrow">Your starter structure</p><h2>{setup.trainingGoal} · {setup.trainingDays}</h2><span className="honesty-note">Built from the choices saved in your profile. Adjust any session to your recovery, experience and available equipment.</span></div><button className="outline-action" onClick={() => setView("Session")}>Open today&apos;s workout</button></header>
+        <div className="week-plan">{weekPlan.map((day) => <article className={day.status} key={day.day}><div><span>{day.day}</span><strong>{day.slot}</strong></div><p><small>{day.status === "rest" ? "Recovery" : `Workout ${day.slot}`}</small><strong>{day.title}</strong><span>{day.focus}</span></p><b>{day.duration}</b></article>)}</div>
         <p className="program-note"><span>i</span><b>Safety note</b> Pain, swelling or loss of normal movement should change the plan. FORGE does not replace medical care.</p>
       </section>}
 

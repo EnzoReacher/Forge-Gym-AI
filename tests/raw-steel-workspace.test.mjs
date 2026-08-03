@@ -12,7 +12,8 @@ test("athlete workspace distinguishes account records, defaults, and previews", 
   const page = await source("app/page.tsx");
 
   assert.match(page, /Account data/);
-  assert.match(page, /Planning preview/);
+  assert.match(page, /Your starter structure/);
+  assert.match(page, /Built from the choices saved in your profile/);
   assert.match(page, /current default targets/);
   assert.match(page, /Rule-based prototype/);
   assert.doesNotMatch(page, /Readiness 92|Tactical channel open|SPARTAN \/ 01/);
@@ -42,7 +43,7 @@ test("new accounts are not given invented working weights", async () => {
   const page = await source("app/page.tsx");
   const initialPlan = page.slice(
     page.indexOf("const initialExercises"),
-    page.indexOf("const weekPlan"),
+    page.indexOf("const exerciseLibrary"),
   );
 
   assert.match(initialPlan, /Choose a comfortable load/);

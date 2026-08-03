@@ -127,6 +127,9 @@ A redesigned screen does not ship until:
 - [x] Persist the athlete's onboarding goal, weekly rhythm, and guidance style
   to the protected account profile; validate all three values on write, show
   them in profile controls, and use the selected style in the coaching preview.
+- [x] Replace the fixed example week with a deterministic starter structure
+  that uses the saved goal and 3/4/5-day rhythm, preserves recovery days, and
+  labels its limits instead of claiming individualized programming.
 - [x] Remove invented starter-workout loads; new athletes choose their own
   comfortable load before FORGE records it.
 - [ ] Complete deployed browser-level weak connection, partial failure, and
