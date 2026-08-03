@@ -117,6 +117,11 @@ function validProfile(value: unknown) {
     (value.trainingGoal === undefined || ["Strength", "Muscle", "Hybrid"].includes(String(value.trainingGoal))) &&
     (value.trainingDays === undefined || ["3 days", "4 days", "5 days"].includes(String(value.trainingDays))) &&
     (value.coachStyle === undefined || ["Protective", "Balanced", "Relentless"].includes(String(value.coachStyle))) &&
+    (value.trainingSlot === undefined || (
+      typeof value.trainingSlot === "number" &&
+      Number.isInteger(value.trainingSlot) &&
+      validFiniteNumber(value.trainingSlot, 1, 5)
+    )) &&
     (value.adultConfirmedAt === undefined || (
       validString(value.adultConfirmedAt, 40) &&
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.adultConfirmedAt) &&

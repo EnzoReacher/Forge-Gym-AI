@@ -35,6 +35,8 @@ test("account state validates setup choices and profile exposes editable control
   assert.match(route, /value\.trainingGoal === undefined \|\| \["Strength", "Muscle", "Hybrid"\]/);
   assert.match(route, /value\.trainingDays === undefined \|\| \["3 days", "4 days", "5 days"\]/);
   assert.match(route, /value\.coachStyle === undefined \|\| \["Protective", "Balanced", "Relentless"\]/);
+  assert.match(route, /value\.trainingSlot === undefined \|\| \(/);
+  assert.match(route, /Number\.isInteger\(value\.trainingSlot\)/);
   assert.match(page, /<p className="eyebrow">Training setup<\/p>/);
   assert.match(page, /<dt>Guidance<\/dt><dd>\{setup\.coachStyle\}<\/dd>/);
   assert.match(page, /styleLead\[setup\.coachStyle\]/);

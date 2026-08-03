@@ -416,6 +416,10 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .week-plan article>b{color:var(--muted);font-size:11px}
 .week-plan article.today{border-left:2px solid var(--red);padding-left:14px}
 .week-plan article.rest{opacity:.62}
+.week-plan article.selected{border-left:2px solid var(--red);padding-left:14px}
+.week-session-action{min-width:82px;min-height:44px;border:1px solid var(--line-strong);border-radius:3px;background:transparent;color:var(--paper);font-size:11px;font-weight:750;cursor:pointer}
+.week-session-action:hover,.week-session-action:focus-visible{border-color:var(--red);color:var(--red)}
+.week-session-action:disabled{cursor:not-allowed;opacity:.42}
 .program-note{margin:24px 0 0;padding:16px 0;border:0;border-top:1px solid var(--line);border-radius:0;background:transparent;color:var(--muted);font-size:12px;line-height:1.6;display:grid;grid-template-columns:24px auto 1fr;gap:10px}
 .program-note>span{color:var(--bronze)}
 .library-search{width:min(100%,360px);height:44px;border-bottom:1px solid var(--line-strong);display:flex;align-items:center;gap:10px}

@@ -130,6 +130,10 @@ A redesigned screen does not ship until:
 - [x] Replace the fixed example week with a deterministic starter structure
   that uses the saved goal and 3/4/5-day rhythm, preserves recovery days, and
   labels its limits instead of claiming individualized programming.
+- [x] Make every workout in the saved starter structure actionable: selecting
+  a slot now prepares a matching zero-load exercise session, carries its real
+  title through Today, Train, completion and Progress, and prevents plan swaps
+  during an active workout.
 - [x] Remove invented starter-workout loads; new athletes choose their own
   comfortable load before FORGE records it.
 - [ ] Complete deployed browser-level weak connection, partial failure, and

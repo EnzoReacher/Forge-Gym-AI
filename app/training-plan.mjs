@@ -69,6 +69,32 @@ const PROGRAMS = {
   },
 };
 
+const MOVEMENTS = {
+  incline: ["Incline dumbbell press", "Upper chest", "Choose a comfortable load · use a pain-free range"],
+  row: ["Chest-supported row", "Back", "Choose a comfortable load · pause with control"],
+  shoulder: ["Seated dumbbell press", "Shoulders", "Choose a comfortable load · stop with 2 clean reps left"],
+  pullup: ["Assisted pull-up", "Back", "Use enough assistance for clean reps"],
+  squat: ["Goblet squat", "Quads", "Use a pain-free depth · keep the load comfortable"],
+  hinge: ["Romanian deadlift", "Hamstrings", "Keep the range controlled · stop if the back or knees hurt"],
+  calf: ["Standing calf raise", "Calves", "Pause at the top · lower with control"],
+  curl: ["Cable curl", "Biceps", "Keep the upper arm still · avoid swinging"],
+  triceps: ["Cable triceps extension", "Triceps", "Move with control · keep the elbows comfortable"],
+  carry: ["Farmer carry", "Grip · Trunk", "Use a load you can carry with tall posture"],
+  stepup: ["Low step-up", "Legs · Conditioning", "Use a stable low step · keep every rep pain-free"],
+  deadbug: ["Dead bug", "Trunk", "Move slowly · keep the lower back controlled"],
+};
+
+const SESSION_MOVEMENTS = {
+  conditioning: ["stepup", "carry", "deadbug"],
+  lowerArms: ["squat", "hinge", "curl", "triceps"],
+  lower: ["squat", "hinge", "calf"],
+  push: ["incline", "shoulder", "triceps"],
+  pull: ["pullup", "row", "curl"],
+  upperCapacity: ["shoulder", "pullup", "carry"],
+  upper: ["incline", "row", "shoulder"],
+  full: ["squat", "incline", "row", "carry"],
+};
+
 function normalizedGoal(goal) {
   return Object.hasOwn(PROGRAMS, goal) ? goal : "Strength";
 }
@@ -108,4 +134,55 @@ export function buildStarterWeek(goal, trainingDays) {
       status: "rest",
     };
   });
+}
+
+function movementGroup(title) {
+  const normalized = title.toLowerCase();
+  if (normalized.includes("conditioning")) return "conditioning";
+  if (normalized.includes("lower & arms")) return "lowerArms";
+  if (normalized.includes("upper capacity")) return "upperCapacity";
+  if (normalized.includes("lower") || normalized === "legs" || normalized.includes("legs &")) return "lower";
+  if (normalized === "push" || normalized.includes("push volume")) return "push";
+  if (normalized === "pull" || normalized.includes("pull volume")) return "pull";
+  if (normalized.includes("upper")) return "upper";
+  return "full";
+}
+
+function repTarget(goal, movementId) {
+  if (movementId === "carry") return 20;
+  if (movementId === "deadbug") return 8;
+  if (movementId === "stepup") return 10;
+  if (goal === "Strength") return 6;
+  if (goal === "Muscle") return 10;
+  return 8;
+}
+
+export function buildStarterSession(goal, trainingDays, requestedSlot = 1) {
+  const safeGoal = normalizedGoal(goal);
+  const week = buildStarterWeek(safeGoal, trainingDays);
+  const sessions = week.filter((day) => day.status !== "rest");
+  const parsedSlot = Number.parseInt(String(requestedSlot), 10);
+  const slotIndex = Number.isFinite(parsedSlot)
+    ? Math.min(Math.max(parsedSlot - 1, 0), sessions.length - 1)
+    : 0;
+  const selected = sessions[slotIndex];
+  const movementIds = SESSION_MOVEMENTS[movementGroup(selected.title)];
+
+  return {
+    slot: slotIndex + 1,
+    title: selected.title,
+    focus: selected.focus,
+    duration: selected.duration,
+    exercises: movementIds.map((movementId) => {
+      const [name, target, cue] = MOVEMENTS[movementId];
+      const reps = repTarget(safeGoal, movementId);
+      return {
+        id: movementId,
+        name,
+        target,
+        cue,
+        sets: Array.from({ length: 3 }, () => ({ kg: 0, reps, rir: 2, done: false })),
+      };
+    }),
+  };
 }

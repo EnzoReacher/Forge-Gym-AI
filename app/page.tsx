@@ -23,7 +23,7 @@ import {
   withMutationTimeout,
   writePendingMutations,
 } from "./record-mutation-queue.mjs";
-import { buildStarterWeek } from "./training-plan.mjs";
+import { buildStarterSession, buildStarterWeek } from "./training-plan.mjs";
 
 type Screen = "Today" | "Train" | "Fuel" | "Coach" | "Progress";
 type TrainView = "Session" | "Week" | "Library";
@@ -46,9 +46,11 @@ type ForgeProfile = {
   trainingGoal?: TrainingGoal;
   trainingDays?: TrainingDays;
   coachStyle?: CoachStyle;
+  trainingSlot?: number;
 };
 type SetLog = { kg: number; reps: number; rir?: number; done: boolean };
 type Exercise = { id: string; name: string; target: string; cue: string; sets: SetLog[] };
+type StarterSession = { slot: number; title: string; focus: string; duration: string; exercises: Exercise[] };
 type Meal = { id: string; recordedAt: number; time: string; name: string; detail: string; kcal: number; protein: number; correctedAt?: string | null };
 type WorkoutSetRecord = { id: string; exerciseId: string; exerciseName: string; position: number; kg: number; reps: number; rir: number };
 type WorkoutSummary = {
@@ -273,7 +275,7 @@ function WorkoutComplete({ summary, onToday, onProgress }: { summary: WorkoutSum
         <p className="eyebrow hot">SESSION FORGED</p>
         <span className="completion-mark">✦</span>
         <h2 id="workout-complete-title">The work is done.<br /><em>The standard remains.</em></h2>
-        <p className="completion-copy">Upper Strength is saved to your account. Recover, refuel, and return when you are ready.</p>
+        <p className="completion-copy">{summary.title} is saved to your account. Recover, refuel, and return when you are ready.</p>
         <div className="completion-stats">
           <div><small>VOLUME</small><strong>{summary.volume.toLocaleString()}<em> kg</em></strong></div>
           <div><small>WORKING SETS</small><strong>{summary.completedSets}<em> / {summary.totalSets}</em></strong></div>
@@ -952,6 +954,11 @@ export default function Home({
     : null;
   const athleteName = profile.displayName.trim().split(/\s+/)[0] || "Athlete";
   const athleteInitial = athleteName.slice(0, 1).toUpperCase();
+  const currentSession = buildStarterSession(
+    profile.trainingGoal ?? "Strength",
+    profile.trainingDays ?? "5 days",
+    profile.trainingSlot ?? 1,
+  );
 
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
@@ -1001,8 +1008,10 @@ export default function Home({
       profile.coachStyle !== initialSetup.coachStyle;
     if (!changed) return;
 
-    setProfile((current) => ({ ...current, ...initialSetup }));
-  }, [accountBacked, accountLoadIssue, accountReady, initialSetup, profile, setProfile]);
+    const session = buildStarterSession(initialSetup.trainingGoal, initialSetup.trainingDays, 1);
+    setProfile((current) => ({ ...current, ...initialSetup, trainingSlot: 1 }));
+    if (!workoutStarted) setExercises(session.exercises as Exercise[]);
+  }, [accountBacked, accountLoadIssue, accountReady, initialSetup, profile, setExercises, setProfile, workoutStarted]);
 
   function go(next: Screen) {
     setScreen(next);
@@ -1032,6 +1041,21 @@ export default function Home({
     setToast("Session started — make every rep count.");
   }
 
+  function selectTrainingSession(slot: number) {
+    if (workoutStarted) {
+      setToast("Finish or end the current workout before changing sessions.");
+      return;
+    }
+    const session = buildStarterSession(
+      profile.trainingGoal ?? "Strength",
+      profile.trainingDays ?? "5 days",
+      slot,
+    );
+    setProfile((current) => ({ ...current, trainingSlot: session.slot }));
+    setExercises(session.exercises as Exercise[]);
+    setToast(`${session.title} is ready. Choose your loads before you begin.`);
+  }
+
   function finishWorkout(summary: WorkoutSummary) {
     records.addWorkout(summary);
     setWorkoutStarted(false);
@@ -1055,7 +1079,9 @@ export default function Home({
       onEnter={(mode, setup) => {
         if (mode === "new" && accountBacked) {
           if (setup) {
-            setProfile((current) => ({ ...current, ...setup }));
+            const session = buildStarterSession(setup.trainingGoal, setup.trainingDays, 1);
+            setProfile((current) => ({ ...current, ...setup, trainingSlot: 1 }));
+            setExercises(session.exercises as Exercise[]);
             setupApplied.current = true;
             setToast("Your training setup is saved to this account.");
           }
@@ -1109,8 +1135,13 @@ export default function Home({
         setProfile({
           ...profile,
           ...(initialSetup ?? {}),
+          ...(initialSetup ? { trainingSlot: 1 } : {}),
           adultConfirmedAt: new Date().toISOString(),
         });
+        if (initialSetup) {
+          const session = buildStarterSession(initialSetup.trainingGoal, initialSetup.trainingDays, 1);
+          setExercises(session.exercises as Exercise[]);
+        }
       }}
       onExit={() => window.location.assign("/signout-with-chatgpt?return_to=%2Fprivacy")}
     />;
@@ -1134,12 +1165,12 @@ export default function Home({
         </header>
 
         <main className="workspace">
-          {screen === "Today" && <Today athleteName={athleteName} exercises={exercises} meals={meals} water={water} workoutStarted={workoutStarted} lastWorkout={workoutHistory[0]} onStart={startWorkout} onCoach={() => go("Coach")} onProgress={() => go("Progress")} />}
+          {screen === "Today" && <Today athleteName={athleteName} exercises={exercises} meals={meals} water={water} workoutStarted={workoutStarted} lastWorkout={workoutHistory[0]} plannedSession={currentSession} onStart={startWorkout} onCoach={() => go("Coach")} onProgress={() => go("Progress")} />}
           {screen === "Train" && <Train exercises={exercises} setExercises={setExercises} started={workoutStarted} setStarted={setWorkoutStarted} startedAt={workoutStartedAt} setStartedAt={setWorkoutStartedAt} onFinish={finishWorkout} notify={setToast} setup={{
             trainingGoal: profile.trainingGoal ?? "Strength",
             trainingDays: profile.trainingDays ?? "5 days",
             coachStyle: profile.coachStyle ?? "Balanced",
-          }} />}
+          }} plannedSession={currentSession} onSelectSession={selectTrainingSession} />}
           {screen === "Fuel" && <Fuel
             meals={meals}
             hydration={hydration}
@@ -1161,6 +1192,7 @@ export default function Home({
             exercises={exercises}
             history={workoutHistory}
             workoutStarted={workoutStarted}
+            liveTitle={currentSession.title}
             onTrain={() => go("Train")}
             onUpdateWorkout={(workout) => records.updateRecord("workout", workout)}
             onDeleteWorkout={(id) => records.removeRecord("workout", id)}
@@ -1176,9 +1208,23 @@ export default function Home({
           profile={profile}
           email={authenticatedUser?.email ?? ""}
           onSave={(next) => {
-            setProfile(next);
+            const planChanged = next.trainingGoal !== profile.trainingGoal || next.trainingDays !== profile.trainingDays;
+            if (planChanged && workoutStarted) {
+              setProfile({
+                ...next,
+                trainingGoal: profile.trainingGoal,
+                trainingDays: profile.trainingDays,
+                trainingSlot: profile.trainingSlot,
+              });
+            } else if (planChanged) {
+              const session = buildStarterSession(next.trainingGoal ?? "Strength", next.trainingDays ?? "5 days", 1);
+              setExercises(session.exercises as Exercise[]);
+              setProfile({ ...next, trainingSlot: 1 });
+            } else {
+              setProfile(next);
+            }
             setProfileOpen(false);
-            setToast("Profile saved to your account.");
+            setToast(planChanged && workoutStarted ? "Finish the current workout before changing its plan." : "Profile saved to your account.");
           }}
           onClose={() => setProfileOpen(false)}
           onReplayLogin={() => {
@@ -1237,7 +1283,7 @@ export default function Home({
   );
 }
 
-function Today({ athleteName, exercises, meals, water, workoutStarted, lastWorkout, onStart, onCoach, onProgress }: { athleteName: string; exercises: Exercise[]; meals: Meal[]; water: number; workoutStarted: boolean; lastWorkout?: WorkoutSummary; onStart: () => void; onCoach: () => void; onProgress: () => void }) {
+function Today({ athleteName, exercises, meals, water, workoutStarted, lastWorkout, plannedSession, onStart, onCoach, onProgress }: { athleteName: string; exercises: Exercise[]; meals: Meal[]; water: number; workoutStarted: boolean; lastWorkout?: WorkoutSummary; plannedSession: StarterSession; onStart: () => void; onCoach: () => void; onProgress: () => void }) {
   const allSets = exercises.flatMap((exercise) => exercise.sets);
   const doneSets = allSets.filter((set) => set.done);
   const calories = meals.reduce((total, meal) => total + meal.kcal, 0);
@@ -1262,10 +1308,10 @@ function Today({ athleteName, exercises, meals, water, workoutStarted, lastWorko
             <div className="session-top">
               <div>
                 <p className="eyebrow hot">{sessionComplete ? "Completed" : workoutStarted ? "Workout in progress" : "Your next move"}</p>
-                <h2>Upper strength</h2>
-                <span>{sessionComplete ? "Saved to your account" : "Chest · Back · Shoulders"}</span>
+                <h2>{sessionComplete ? lastWorkout!.title : plannedSession.title}</h2>
+                <span>{sessionComplete ? "Saved to your account" : plannedSession.focus}</span>
               </div>
-              <span className="duration">{sessionComplete ? formatClock(lastWorkout!.durationSeconds) : workoutStarted ? `${doneSets.length}/${allSets.length} sets` : "45–60 min"}</span>
+              <span className="duration">{sessionComplete ? formatClock(lastWorkout!.durationSeconds) : workoutStarted ? `${doneSets.length}/${allSets.length} sets` : plannedSession.duration}</span>
             </div>
 
             <div className="exercise-preview">
@@ -1325,6 +1371,8 @@ function Train({
   onFinish,
   notify,
   setup,
+  plannedSession,
+  onSelectSession,
 }: {
   exercises: Exercise[];
   setExercises: React.Dispatch<React.SetStateAction<Exercise[]>>;
@@ -1335,6 +1383,8 @@ function Train({
   onFinish: (summary: WorkoutSummary) => void;
   notify: (message: string) => void;
   setup: ForgeSetup;
+  plannedSession: StarterSession;
+  onSelectSession: (slot: number) => void;
 }) {
   const [view, setView] = useState<TrainView>("Session");
   const [libraryQuery, setLibraryQuery] = useState("");
@@ -1421,7 +1471,7 @@ function Train({
     const summary: WorkoutSummary = {
       id: crypto.randomUUID(),
       completedAt,
-      title: "Upper strength",
+      title: plannedSession.title,
       durationSeconds: Math.max(1, elapsedSeconds),
       completedSets: done.length,
       totalSets: allSets.length,
@@ -1484,7 +1534,7 @@ function Train({
       {view === "Session" && <div id="train-panel-session" className="training-layout" role="tabpanel" aria-labelledby="train-tab-session">
         <section className="training-main">
           <div className="training-banner">
-            <div><p className="eyebrow hot">{started ? "Workout in progress" : "Starter workout"}</p><h2>Upper strength</h2><span>{started ? `${done.length} of ${allSets.length} sets logged · ${volume.toLocaleString()} kg` : `${allSets.length} working sets · choose a comfortable load before each movement`}</span></div>
+            <div><p className="eyebrow hot">{started ? "Workout in progress" : `Workout ${String(plannedSession.slot).padStart(2, "0")}`}</p><h2>{plannedSession.title}</h2><span>{started ? `${done.length} of ${allSets.length} sets logged · ${volume.toLocaleString()} kg` : `${plannedSession.focus} · ${allSets.length} working sets · choose a comfortable load`}</span></div>
             <button className="primary-action" onClick={beginSession}>{started ? `Live · ${elapsed}` : "Begin session"} <span>→</span></button>
           </div>
           <div className="exercise-accordion">
@@ -1545,7 +1595,20 @@ function Train({
 
       {view === "Week" && <section id="train-panel-week" className="week-board" role="tabpanel" aria-labelledby="train-tab-week">
         <header><div><p className="eyebrow">Your starter structure</p><h2>{setup.trainingGoal} · {setup.trainingDays}</h2><span className="honesty-note">Built from the choices saved in your profile. Adjust any session to your recovery, experience and available equipment.</span></div><button className="outline-action" onClick={() => setView("Session")}>Open today&apos;s workout</button></header>
-        <div className="week-plan">{weekPlan.map((day) => <article className={day.status} key={day.day}><div><span>{day.day}</span><strong>{day.slot}</strong></div><p><small>{day.status === "rest" ? "Recovery" : `Workout ${day.slot}`}</small><strong>{day.title}</strong><span>{day.focus}</span></p><b>{day.duration}</b></article>)}</div>
+        <div className="week-plan">{weekPlan.map((day) => {
+          const trainingDay = day.status !== "rest";
+          const selected = trainingDay && Number(day.slot) === plannedSession.slot;
+          return <article className={`${day.status}${selected ? " selected" : ""}`} key={day.day}>
+            <div><span>{day.day}</span><strong>{day.slot}</strong></div>
+            <p><small>{day.status === "rest" ? "Recovery" : `Workout ${day.slot}`}</small><strong>{day.title}</strong><span>{day.focus}</span></p>
+            {trainingDay
+              ? <button className="week-session-action" disabled={started && !selected} aria-label={`${selected ? "Open" : "Prepare"} ${day.title}`} onClick={() => {
+                onSelectSession(Number(day.slot));
+                if (!started || selected) setView("Session");
+              }}>{selected ? "Open" : "Prepare"}</button>
+              : <b>{day.duration}</b>}
+          </article>;
+        })}</div>
         <p className="program-note"><span>i</span><b>Safety note</b> Pain, swelling or loss of normal movement should change the plan. FORGE does not replace medical care.</p>
       </section>}
 
@@ -1793,6 +1856,7 @@ function Progress({
   exercises,
   history,
   workoutStarted,
+  liveTitle,
   onTrain,
   onUpdateWorkout,
   onDeleteWorkout,
@@ -1800,6 +1864,7 @@ function Progress({
   exercises: Exercise[];
   history: WorkoutSummary[];
   workoutStarted: boolean;
+  liveTitle: string;
   onTrain: () => void;
   onUpdateWorkout: (workout: WorkoutSummary) => void;
   onDeleteWorkout: (id: string) => void;
@@ -1856,7 +1921,7 @@ function Progress({
       <div className="progress-lower">
         <section className="recent-sessions">
           <header><p className="eyebrow">Recent workouts</p><span>{history.length} total</span></header>
-          {workoutStarted && <div><time>Today</time><strong>Upper strength</strong><span>{currentVolume ? `${currentVolume.toLocaleString()} kg` : "In progress"}</span><b>LIVE</b></div>}
+          {workoutStarted && <div><time>Today</time><strong>{liveTitle}</strong><span>{currentVolume ? `${currentVolume.toLocaleString()} kg` : "In progress"}</span><b>LIVE</b></div>}
           {history.slice(0, 4).map((session) => <div key={session.id}><time>{new Date(session.completedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}</time><strong>{session.title}</strong><span>{session.volume.toLocaleString()} kg</span><b>{session.completedSets}/{session.totalSets}</b><div className="record-actions"><button aria-label={`Edit ${session.title} workout`} onClick={() => setEditingWorkout(session)}>Edit</button><button aria-label={`Remove ${session.title} workout`} onClick={() => {
             if (window.confirm("Remove this completed workout from your account?")) onDeleteWorkout(session.id);
           }}>Remove</button></div></div>)}
