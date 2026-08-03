@@ -23,12 +23,18 @@ test("privacy notice describes actual data use and current release limits", asyn
     "inspect, correct, export and delete",
     "after 90 days",
     "Private beta · adults 18+",
+    "does not ask for or store your birth date",
+    "must confirm that they are at least 18",
     "not a claim of legal certification",
   ]) {
     assert.match(privacy, new RegExp(phrase, "i"));
   }
   assert.match(page, /href="\/privacy"/);
   assert.match(page, /Privacy and data/);
+  assert.match(page, /I am 18 or older/);
+  assert.match(page, /I am under 18/);
+  assert.match(page, /adultConfirmedAt/);
+  assert.doesNotMatch(page, /type="date"/);
 });
 
 test("audit cutoff is deterministic and uses a SQLite UTC timestamp", () => {

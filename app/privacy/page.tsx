@@ -1,6 +1,6 @@
 /* eslint-disable @next/next/no-html-link-for-pages -- vinext preview currently hydrates next/link with a duplicate React dispatcher. */
 
-const UPDATED = "31 July 2026";
+const UPDATED = "3 August 2026";
 
 export default function PrivacyPage() {
   return (
@@ -29,6 +29,7 @@ export default function PrivacyPage() {
           <h2>Only what supports your account and your training.</h2>
           <ul>
             <li>Your platform-provided email and display name, plus FORGE account status, role and plan.</li>
+            <li>The time you confirmed that you are at least 18. FORGE does not ask for or store your birth date.</li>
             <li>Workouts, sets, meals, hydration, progress and preferences that you choose to save.</li>
             <li>Limited operational and security metadata used to keep the service reliable and investigate abuse.</li>
           </ul>
@@ -97,9 +98,11 @@ export default function PrivacyPage() {
           <p className="privacy-index">06 / Age and contact</p>
           <h2>The current beta is for adults.</h2>
           <p>
-            FORGE is not yet designed for children. Guardian consent,
-            age-appropriate explanations and youth safety controls are required
-            before access can be offered to anyone under 18.
+            Every signed-in athlete must confirm that they are at least 18
+            before the current private beta opens. FORGE is not yet designed
+            for children. Guardian consent, age-appropriate explanations and
+            youth safety controls are required before access can be offered to
+            anyone under 18.
           </p>
           <p>
             During this owner-only beta, privacy actions are available through

@@ -172,8 +172,8 @@ A redesigned screen does not ship until:
   activity without claiming that scheduling is active.
 - [ ] Activate scheduled retention enforcement, managed backup expiry, and a
   dedicated external privacy contact before wider access.
-- [ ] Add guardian consent, age-appropriate explanations, and youth safety
-  controls before offering FORGE to anyone under 18.
+- [x] Enforce an adults-only private-beta boundary with a minimal 18+
+  attestation, record only its confirmation time, and collect no birth date.
 - [ ] Obtain an independent security review appropriate to the collected data.
 
 ## Later — only after the foundations pass
@@ -184,6 +184,8 @@ A redesigned screen does not ship until:
 3. Production AI coaching with safety boundaries, cost telemetry, and clear
    uncertainty.
 4. Mobile delivery using the same product rules, data contracts, and APIs.
+5. Guardian consent, age-appropriate explanations, and youth safety controls
+   before FORGE is ever offered to anyone under 18.
 
 Admin, billing, and mobile must not force the athlete interface to become more
 complex today.

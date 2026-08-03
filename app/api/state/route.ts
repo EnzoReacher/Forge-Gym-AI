@@ -113,7 +113,12 @@ function validProfile(value: unknown) {
     isRecord(value) &&
     validString(value.displayName, 80) &&
     ["Metric", "Imperial"].includes(String(value.units)) &&
-    typeof value.notifications === "boolean"
+    typeof value.notifications === "boolean" &&
+    (value.adultConfirmedAt === undefined || (
+      validString(value.adultConfirmedAt, 40) &&
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.adultConfirmedAt) &&
+      !Number.isNaN(Date.parse(value.adultConfirmedAt))
+    ))
   );
 }
 

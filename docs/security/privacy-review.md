@@ -8,6 +8,7 @@ privacy contact remain gates before access is widened.
 
 - Platform-provided account identifier, email, and display name.
 - Account status and server-owned role and plan.
+- Adult eligibility confirmation time. FORGE does not collect a birth date.
 - Workouts, individual sets, meals, hydration changes, progress, and profile
   preferences that the athlete chooses to save.
 - Fixed-shape operational events and request IDs without identity, request
@@ -39,6 +40,8 @@ review, managed backup expiry, and independent security assessment remain
 release gates.
 
 The public notice plainly states collection purpose, current retention,
-deletion, infrastructure providers, present contact limits, and the adults-only
-beta boundary. A dedicated external privacy contact and any region-specific
-rights process must be completed before additional users are invited.
+deletion, infrastructure providers, present contact limits, and the enforced
+adults-only beta boundary. Every signed-in athlete must attest that they are at
+least 18 before athlete features open. A dedicated external privacy contact and
+any region-specific rights process must be completed before additional users
+are invited.

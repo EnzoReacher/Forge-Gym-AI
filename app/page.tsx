@@ -29,7 +29,12 @@ type TrainView = "Session" | "Week" | "Library";
 type EntryStage = "landing" | "login" | "onboarding" | "app";
 type LaunchMode = "return" | "new";
 export type ForgeAuthenticatedUser = { displayName: string; email: string };
-type ForgeProfile = { displayName: string; units: "Metric" | "Imperial"; notifications: boolean };
+type ForgeProfile = {
+  displayName: string;
+  units: "Metric" | "Imperial";
+  notifications: boolean;
+  adultConfirmedAt?: string;
+};
 type SetLog = { kg: number; reps: number; rir?: number; done: boolean };
 type Exercise = { id: string; name: string; target: string; cue: string; sets: SetLog[] };
 type Meal = { id: string; recordedAt: number; time: string; name: string; detail: string; kcal: number; protein: number; correctedAt?: string | null };
@@ -202,6 +207,31 @@ function CinematicIntro({ mode, athleteName, onSkip }: { mode: LaunchMode; athle
       </div>
       <button className="cinematic-skip" onClick={onSkip} autoFocus>Skip intro</button>
     </div>
+  );
+}
+
+function AdultAccessGate({ onConfirm, onExit }: { onConfirm: () => void; onExit: () => void }) {
+  return (
+    <main className="entry-shell adult-access-gate" aria-labelledby="adult-access-title">
+      <ForgeAmbience density={12} />
+      <section className="adult-access-panel">
+        <p className="entry-eyebrow">Private beta access</p>
+        <h1 id="adult-access-title">FORGE is currently for adults 18+.</h1>
+        <p>
+          Confirm that you are at least 18 to continue. We record only the
+          confirmation time—we do not ask for or store your birth date.
+        </p>
+        <div className="adult-access-actions">
+          <button className="entry-primary" onClick={onConfirm}>I am 18 or older <span>→</span></button>
+          <button className="adult-access-exit" onClick={onExit}>I am under 18</button>
+        </div>
+        <small>
+          FORGE will add guardian consent, age-appropriate explanations and
+          youth safety controls before offering access to anyone under 18.
+          <a href="/privacy"> Read the privacy notice.</a>
+        </small>
+      </section>
+    </main>
   );
 }
 
@@ -1010,6 +1040,16 @@ export default function Home({
         : retryAccountData;
     const reference = accountIssueReference(accountLoadIssue);
     return <div className="account-loading account-error" role="alert"><ForgeAmbience density={10} /><strong>FORGE</strong><span>{message}</span>{reference && <small>{reference}</small>}<button onClick={action}>{accountLoadIssue.kind === "session" ? "Sign in again" : accountLoadIssue.kind === "access" ? "Reload account" : "Try again"}</button></div>;
+  }
+
+  if (accountBacked && !profile.adultConfirmedAt) {
+    return <AdultAccessGate
+      onConfirm={() => setProfile({
+        ...profile,
+        adultConfirmedAt: new Date().toISOString(),
+      })}
+      onExit={() => window.location.assign("/signout-with-chatgpt?return_to=%2Fprivacy")}
+    />;
   }
 
   return (

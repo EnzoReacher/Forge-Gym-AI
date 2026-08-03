@@ -21,6 +21,7 @@ test("release status reports only incomplete pre-wider-access gates", async () =
   assert.ok(blockers.some((item) => /automated encrypted backups/i.test(item)));
   assert.ok(blockers.some((item) => /independent security review/i.test(item)));
   assert.ok(blockers.some((item) => /against the deployed runtime\.$/i.test(item)));
+  assert.ok(blockers.every((item) => !/guardian consent|under 18/i.test(item)));
   assert.ok(blockers.every((item) => !/Admin Control Center/i.test(item)));
 });
 
