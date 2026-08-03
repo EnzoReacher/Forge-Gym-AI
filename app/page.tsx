@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, memo, useCallback, useEffect, useRef, useState } from "react";
+import { loadAccountResource } from "./account-load-recovery.mjs";
 import {
   clearPendingAccountState,
   createLatestAccountStateSync,
@@ -290,6 +291,7 @@ function useStoredState<T>(key: string, fallback: T, accountBacked = false) {
   const [dirty, setDirty] = useState(false);
   const [loadError, setLoadError] = useState<AccountIssue>(null);
   const [syncError, setSyncError] = useState<AccountIssue>(null);
+  const [loadRetryNonce, setLoadRetryNonce] = useState(0);
   const [retryNonce, setRetryNonce] = useState(0);
   const latestValue = useRef(fallback);
   const latestRevision = useRef(0);
@@ -324,14 +326,18 @@ function useStoredState<T>(key: string, fallback: T, accountBacked = false) {
         });
       }
 
-      fetch(`/api/state?key=${encodeURIComponent(key)}`, {
-        headers: { Accept: "application/json" },
-        credentials: "same-origin",
-      })
-        .then(async (response) => {
+      loadAccountResource(
+        async (signal: AbortSignal) => {
+          const response = await fetch(`/api/state?key=${encodeURIComponent(key)}`, {
+            headers: { Accept: "application/json" },
+            credentials: "same-origin",
+            signal,
+          });
           if (!response.ok) throw new Error(accountIssueForStatus(response.status));
           return response.json() as Promise<{ value: T | null }>;
-        })
+        },
+        { shouldRetry: (error: unknown) => accountIssueFromError(error) === "unavailable" },
+      )
         .then((payload) => {
           if (!cancelled) {
             setLoadError(null);
@@ -368,7 +374,7 @@ function useStoredState<T>(key: string, fallback: T, accountBacked = false) {
       setReady(true);
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [accountBacked, key]);
+  }, [accountBacked, key, loadRetryNonce]);
 
   useEffect(() => {
     if (!accountBacked) return;
@@ -422,7 +428,17 @@ function useStoredState<T>(key: string, fallback: T, accountBacked = false) {
     try { window.localStorage.setItem(key, JSON.stringify(value)); } catch {}
   }, [accountBacked, dirty, key, loadError, ready, retryNonce, value]);
 
-  return [value, updateValue, ready, loadError, syncError, () => setRetryNonce((current) => current + 1)] as const;
+  const retry = useCallback(() => {
+    if (loadError) {
+      setReady(false);
+      setLoadError(null);
+      setLoadRetryNonce((current) => current + 1);
+      return;
+    }
+    setRetryNonce((current) => current + 1);
+  }, [loadError]);
+
+  return [value, updateValue, ready, loadError, syncError, retry] as const;
 }
 
 function useDurableRecords(accountBacked: boolean) {
@@ -432,6 +448,7 @@ function useDurableRecords(accountBacked: boolean) {
   const [ready, setReady] = useState(!accountBacked);
   const [loadError, setLoadError] = useState<AccountIssue>(null);
   const [syncError, setSyncError] = useState<AccountIssue>(null);
+  const [loadRetryNonce, setLoadRetryNonce] = useState(0);
   const pending = useRef(new Map<string, PendingRecordMutation>());
   const draining = useRef(false);
 
@@ -489,7 +506,15 @@ function useDurableRecords(accountBacked: boolean) {
     void drainPending();
   }, [accountBacked, drainPending, persistPending]);
 
-  const retry = drainPending;
+  const retry = useCallback(() => {
+    if (loadError) {
+      setReady(false);
+      setLoadError(null);
+      setLoadRetryNonce((current) => current + 1);
+      return;
+    }
+    void drainPending();
+  }, [drainPending, loadError]);
 
   useEffect(() => {
     if (!accountBacked) return;
@@ -497,14 +522,18 @@ function useDurableRecords(accountBacked: boolean) {
     const restored = readPendingMutations(window.sessionStorage) as PendingRecordMutation[];
     pending.current = new Map(restored.map((mutation) => [mutation.key, mutation]));
     writePendingMutations(window.sessionStorage, restored);
-    fetch("/api/records", {
-      headers: { Accept: "application/json" },
-      credentials: "same-origin",
-    })
-      .then(async (response) => {
+    loadAccountResource(
+      async (signal: AbortSignal) => {
+        const response = await fetch("/api/records", {
+          headers: { Accept: "application/json" },
+          credentials: "same-origin",
+          signal,
+        });
         if (!response.ok) throw new Error(accountIssueForStatus(response.status));
         return response.json() as Promise<{ workouts: WorkoutSummary[]; meals: Meal[]; hydration: HydrationEntry[] }>;
-      })
+      },
+      { shouldRetry: (error: unknown) => accountIssueFromError(error) === "unavailable" },
+    )
       .then((records) => {
         if (cancelled) return;
         const reconciled = applyPendingMutations(records, restored) as {
@@ -516,7 +545,7 @@ function useDurableRecords(accountBacked: boolean) {
         setMeals(reconciled.meals);
         setHydration(reconciled.hydration);
         setLoadError(null);
-        if (restored.length) void retry();
+        if (restored.length) void drainPending();
       })
       .catch((error) => {
         if (!cancelled) setLoadError(accountIssueFromError(error));
@@ -527,7 +556,7 @@ function useDurableRecords(accountBacked: boolean) {
     return () => {
       cancelled = true;
     };
-  }, [accountBacked, retry]);
+  }, [accountBacked, drainPending, loadRetryNonce]);
 
   useEffect(() => {
     const online = () => void retry();
@@ -925,6 +954,14 @@ export default function Home({
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function retryAccountData() {
+    retryExercises();
+    retryWorkout();
+    retryStartedAt();
+    retryProfile();
+    void records.retry();
+  }
+
   function startWorkout() {
     const allSetsFinished = exercises.every((exercise) => exercise.sets.every((set) => set.done));
     if (allSetsFinished) {
@@ -977,7 +1014,12 @@ export default function Home({
       : accountLoadIssue === "access"
         ? "This account cannot access FORGE right now."
         : "FORGE could not load your account. Your saved data has not been changed.";
-    return <div className="account-loading account-error" role="alert"><ForgeAmbience density={10} /><strong>FORGE</strong><span>{message}</span><button onClick={() => accountLoadIssue === "session" ? window.location.assign("/signout-with-chatgpt?return_to=%2F") : window.location.reload()}>{accountLoadIssue === "session" ? "Sign in again" : "Try again"}</button></div>;
+    const action = accountLoadIssue === "session"
+      ? () => window.location.assign("/signout-with-chatgpt?return_to=%2F")
+      : accountLoadIssue === "access"
+        ? () => window.location.reload()
+        : retryAccountData;
+    return <div className="account-loading account-error" role="alert"><ForgeAmbience density={10} /><strong>FORGE</strong><span>{message}</span><button onClick={action}>{accountLoadIssue === "session" ? "Sign in again" : accountLoadIssue === "access" ? "Reload account" : "Try again"}</button></div>;
   }
 
   return (
@@ -1070,11 +1112,7 @@ export default function Home({
             window.location.reload();
             return;
           }
-          retryExercises();
-          retryWorkout();
-          retryStartedAt();
-          retryProfile();
-          void records.retry();
+          retryAccountData();
         }}>{accountSyncIssue === "session" ? "Sign in again" : accountSyncIssue === "access" ? "Reload account" : "Retry now"}</button></div>}
       </div>
       {finishSummary && <WorkoutComplete

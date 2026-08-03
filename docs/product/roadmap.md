@@ -101,6 +101,9 @@ A redesigned screen does not ship until:
   value, bound hung requests, and retain the latest Profile or live-workout
   edit in temporary per-tab storage until the server confirms that exact
   revision.
+- [x] Bound initial account-state and record reads, retry one transient failure,
+  and let the athlete retry only failed account data without restarting the
+  whole app.
 - [x] Keep multi-table workout creation, correction, set replacement, audit,
   and deletion atomic so a partial database failure cannot split a workout
   from its sets or correction history.

@@ -109,6 +109,8 @@ test("records route authenticates and scopes reads, corrections, deletes, and ex
 test("client uses durable records with optimistic retry, correction, export, and deliberate deletion", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   assert.match(page, /function useDurableRecords/);
+  assert.match(page, /loadAccountResource/);
+  assert.match(page, /function retryAccountData/);
   assert.match(page, /window\.addEventListener\("online", online\)/);
   assert.match(page, /window\.sessionStorage/);
   assert.match(page, /applyPendingMutations/);
