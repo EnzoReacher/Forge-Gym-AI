@@ -114,6 +114,9 @@ function validProfile(value: unknown) {
     validString(value.displayName, 80) &&
     ["Metric", "Imperial"].includes(String(value.units)) &&
     typeof value.notifications === "boolean" &&
+    (value.trainingGoal === undefined || ["Strength", "Muscle", "Hybrid"].includes(String(value.trainingGoal))) &&
+    (value.trainingDays === undefined || ["3 days", "4 days", "5 days"].includes(String(value.trainingDays))) &&
+    (value.coachStyle === undefined || ["Protective", "Balanced", "Relentless"].includes(String(value.coachStyle))) &&
     (value.adultConfirmedAt === undefined || (
       validString(value.adultConfirmedAt, 40) &&
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.adultConfirmedAt) &&

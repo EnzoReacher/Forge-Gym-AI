@@ -29,11 +29,22 @@ type TrainView = "Session" | "Week" | "Library";
 type EntryStage = "landing" | "login" | "onboarding" | "app";
 type LaunchMode = "return" | "new";
 export type ForgeAuthenticatedUser = { displayName: string; email: string };
+export type TrainingGoal = "Strength" | "Muscle" | "Hybrid";
+export type TrainingDays = "3 days" | "4 days" | "5 days";
+export type CoachStyle = "Protective" | "Balanced" | "Relentless";
+export type ForgeSetup = {
+  trainingGoal: TrainingGoal;
+  trainingDays: TrainingDays;
+  coachStyle: CoachStyle;
+};
 type ForgeProfile = {
   displayName: string;
   units: "Metric" | "Imperial";
   notifications: boolean;
   adultConfirmedAt?: string;
+  trainingGoal?: TrainingGoal;
+  trainingDays?: TrainingDays;
+  coachStyle?: CoachStyle;
 };
 type SetLog = { kg: number; reps: number; rir?: number; done: boolean };
 type Exercise = { id: string; name: string; target: string; cue: string; sets: SetLog[] };
@@ -648,12 +659,20 @@ function useDurableRecords(accountBacked: boolean) {
   };
 }
 
-function EntryFlow({ onEnter, initialStage = "landing" }: { onEnter: (mode: LaunchMode) => void; initialStage?: Exclude<EntryStage, "app"> }) {
+function EntryFlow({
+  onEnter,
+  initialStage = "landing",
+  initialSetup = null,
+}: {
+  onEnter: (mode: LaunchMode, setup?: ForgeSetup) => void;
+  initialStage?: Exclude<EntryStage, "app">;
+  initialSetup?: ForgeSetup | null;
+}) {
   const [stage, setStage] = useState<Exclude<EntryStage, "app">>(initialStage);
   const [step, setStep] = useState(1);
-  const [goal, setGoal] = useState("Strength");
-  const [days, setDays] = useState("5 days");
-  const [coachStyle, setCoachStyle] = useState("Balanced");
+  const [goal, setGoal] = useState<TrainingGoal>(initialSetup?.trainingGoal ?? "Strength");
+  const [days, setDays] = useState<TrainingDays>(initialSetup?.trainingDays ?? "5 days");
+  const [coachStyle, setCoachStyle] = useState<CoachStyle>(initialSetup?.coachStyle ?? "Balanced");
 
   if (stage === "landing") {
     return (
@@ -829,7 +848,7 @@ function EntryFlow({ onEnter, initialStage = "landing" }: { onEnter: (mode: Laun
       ["Hybrid", "Balance strength with conditioning.", "03"],
     ],
     value: goal,
-    setValue: setGoal,
+    setValue: (value: string) => setGoal(value as TrainingGoal),
   } : step === 2 ? {
     eyebrow: "Your week",
     title: "How often can you train?",
@@ -840,7 +859,7 @@ function EntryFlow({ onEnter, initialStage = "landing" }: { onEnter: (mode: Laun
       ["5 days", "More frequent, shorter exposures.", "05"],
     ],
     value: days,
-    setValue: setDays,
+    setValue: (value: string) => setDays(value as TrainingDays),
   } : {
     eyebrow: "Your guidance",
     title: "How should the coach respond?",
@@ -851,7 +870,7 @@ function EntryFlow({ onEnter, initialStage = "landing" }: { onEnter: (mode: Laun
       ["Relentless", "Short, demanding cues with less reassurance.", "R"],
     ],
     value: coachStyle,
-    setValue: setCoachStyle,
+    setValue: (value: string) => setCoachStyle(value as CoachStyle),
   };
 
   return (
@@ -888,7 +907,11 @@ function EntryFlow({ onEnter, initialStage = "landing" }: { onEnter: (mode: Laun
           </div>
           <div className="onboarding-actions">
             <button disabled={step === 1} onClick={() => setStep((current) => Math.max(1, current - 1))}>← Back</button>
-            <button className="entry-primary" onClick={() => step < 3 ? setStep(step + 1) : onEnter("new")}>{step < 3 ? "Continue" : "Build my plan"} <span>→</span></button>
+            <button className="entry-primary" onClick={() => step < 3 ? setStep(step + 1) : onEnter("new", {
+              trainingGoal: goal,
+              trainingDays: days,
+              coachStyle,
+            })}>{step < 3 ? "Continue" : "Save my setup"} <span>→</span></button>
           </div>
         </div>
       </main>
@@ -901,10 +924,12 @@ export default function Home({
   initialEntryStage = "landing",
   initialLaunchMode = null,
   authenticatedUser = null,
+  initialSetup = null,
 }: {
   initialEntryStage?: EntryStage;
   initialLaunchMode?: LaunchMode | null;
   authenticatedUser?: ForgeAuthenticatedUser | null;
+  initialSetup?: ForgeSetup | null;
 }) {
   const accountBacked = Boolean(authenticatedUser);
   const identityName = authenticatedUser?.displayName?.trim() || "Athlete";
@@ -925,6 +950,7 @@ export default function Home({
   const [toast, setToast] = useState("");
   const [launchMode, setLaunchMode] = useState<LaunchMode | null>(initialLaunchMode);
   const [finishSummary, setFinishSummary] = useState<WorkoutSummary | null>(null);
+  const setupApplied = useRef(false);
   const { workouts: workoutHistory, meals, hydration, water } = records;
   const accountReady = !accountBacked || [exercisesReady, workoutReady, startedAtReady, profileReady, records.ready].every(Boolean);
   const accountLoadIssue = accountBacked
@@ -966,6 +992,26 @@ export default function Home({
     }, reducedMotion ? 320 : launchMode === "return" ? 1050 : 2150);
     return () => window.clearTimeout(id);
   }, [launchMode]);
+
+  useEffect(() => {
+    if (
+      setupApplied.current ||
+      !initialSetup ||
+      !accountBacked ||
+      !accountReady ||
+      accountLoadIssue ||
+      !profile.adultConfirmedAt
+    ) return;
+
+    setupApplied.current = true;
+    window.history.replaceState(window.history.state, "", "/app");
+    const changed = profile.trainingGoal !== initialSetup.trainingGoal ||
+      profile.trainingDays !== initialSetup.trainingDays ||
+      profile.coachStyle !== initialSetup.coachStyle;
+    if (!changed) return;
+
+    setProfile((current) => ({ ...current, ...initialSetup }));
+  }, [accountBacked, accountLoadIssue, accountReady, initialSetup, profile, setProfile]);
 
   function go(next: Screen) {
     setScreen(next);
@@ -1015,11 +1061,33 @@ export default function Home({
 
   if (entryStage !== "app" && !launchMode) {
     return <EntryFlow
-      onEnter={(mode) => {
-        const returnTo = mode === "new" ? "/app?welcome=new" : "/app";
+      onEnter={(mode, setup) => {
+        if (mode === "new" && accountBacked) {
+          if (setup) {
+            setProfile((current) => ({ ...current, ...setup }));
+            setupApplied.current = true;
+            setToast("Your training setup is saved to this account.");
+          }
+          setEntryStage("app");
+          return;
+        }
+
+        const params = new URLSearchParams();
+        if (mode === "new") params.set("welcome", "new");
+        if (setup) {
+          params.set("goal", setup.trainingGoal);
+          params.set("days", setup.trainingDays);
+          params.set("coach", setup.coachStyle);
+        }
+        const returnTo = params.size ? `/app?${params.toString()}` : "/app";
         window.location.assign(returnTo);
       }}
       initialStage={entryStage}
+      initialSetup={accountBacked ? {
+        trainingGoal: profile.trainingGoal ?? "Strength",
+        trainingDays: profile.trainingDays ?? "5 days",
+        coachStyle: profile.coachStyle ?? "Balanced",
+      } : null}
     />;
   }
 
@@ -1044,10 +1112,15 @@ export default function Home({
 
   if (accountBacked && !profile.adultConfirmedAt) {
     return <AdultAccessGate
-      onConfirm={() => setProfile({
-        ...profile,
-        adultConfirmedAt: new Date().toISOString(),
-      })}
+      onConfirm={() => {
+        setupApplied.current = Boolean(initialSetup);
+        if (initialSetup) window.history.replaceState(window.history.state, "", "/app");
+        setProfile({
+          ...profile,
+          ...(initialSetup ?? {}),
+          adultConfirmedAt: new Date().toISOString(),
+        });
+      }}
       onExit={() => window.location.assign("/signout-with-chatgpt?return_to=%2Fprivacy")}
     />;
   }
@@ -1084,7 +1157,11 @@ export default function Home({
             onAdjustWater={adjustWater}
             notify={setToast}
           />}
-          {screen === "Coach" && <Coach exercises={exercises} meals={meals} />}
+          {screen === "Coach" && <Coach exercises={exercises} meals={meals} setup={{
+            trainingGoal: profile.trainingGoal ?? "Strength",
+            trainingDays: profile.trainingDays ?? "5 days",
+            coachStyle: profile.coachStyle ?? "Balanced",
+          }} />}
           {screen === "Progress" && <Progress
             exercises={exercises}
             history={workoutHistory}
@@ -1631,9 +1708,14 @@ function Fuel({
     </div>
   );
 }
-function Coach({ exercises, meals }: { exercises: Exercise[]; meals: Meal[] }) {
+function Coach({ exercises, meals, setup }: { exercises: Exercise[]; meals: Meal[]; setup: ForgeSetup }) {
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState([{ role: "coach", text: "I can review the sets and meals you log here. This preview uses simple rules, not a live AI coaching service." }]);
+  const styleOpening: Record<CoachStyle, string> = {
+    Protective: "I will keep fatigue, pain and recovery visible in every answer.",
+    Balanced: "I will keep the next action direct and put sensible guardrails around it.",
+    Relentless: "I will be brief and demanding, but pain and unsafe work still stop the plan.",
+  };
+  const [messages, setMessages] = useState([{ role: "coach", text: `${styleOpening[setup.coachStyle]} This preview uses simple rules, not a live AI coaching service.` }]);
   const protein = meals.reduce((total, meal) => total + meal.protein, 0);
   const done = exercises.flatMap((exercise) => exercise.sets).filter((set) => set.done).length;
   const totalSets = exercises.flatMap((exercise) => exercise.sets).length;
@@ -1647,7 +1729,12 @@ function Coach({ exercises, meals }: { exercises: Exercise[]; meals: Meal[] }) {
   function send(text = input) {
     if (!text.trim()) return;
     const lower = text.toLowerCase();
-    let answer = `You have logged ${done} of ${totalSets} working sets and ${protein} g of protein today. Finish the next planned set with clean technique before adding more work.`;
+    const styleLead: Record<CoachStyle, string> = {
+      Protective: "Keep the next decision conservative.",
+      Balanced: "Use today’s evidence, then take one clear step.",
+      Relentless: "Do the next clean rep; do not add work for ego.",
+    };
+    let answer = `${styleLead[setup.coachStyle]} You have logged ${done} of ${totalSets} working sets and ${protein} g of protein today. Finish the next planned set with clean technique before adding more work.`;
     if (lower.includes("dinner") || lower.includes("ăn")) answer = `The current default target leaves about ${proteinLeft} g of protein. Keep dinner simple: a protein source, rice or another carbohydrate, vegetables and water. Adjust portions to your needs.`;
     if (lower.includes("pain") || lower.includes("hurt") || lower.includes("đau")) answer = "Stop the painful movement. Reduce load or range only if the movement becomes pain-free. New swelling, weakness or persistent pain needs qualified medical advice.";
     setMessages((current) => [...current, { role: "user", text }, { role: "coach", text: answer }]);
@@ -1686,6 +1773,9 @@ function Coach({ exercises, meals }: { exercises: Exercise[]; meals: Meal[] }) {
         <aside className="coach-intel">
           <header><p>What this preview can see</p><span>Today</span></header>
           <dl className="coach-facts">
+            <div><dt>Goal</dt><dd>{setup.trainingGoal}</dd></div>
+            <div><dt>Weekly rhythm</dt><dd>{setup.trainingDays}</dd></div>
+            <div><dt>Guidance</dt><dd>{setup.coachStyle}</dd></div>
             <div><dt>Sets logged</dt><dd>{done} / {totalSets}</dd></div>
             <div><dt>Meals logged</dt><dd>{meals.length}</dd></div>
             <div><dt>Protein logged</dt><dd>{protein} g</dd></div>
@@ -1996,6 +2086,11 @@ function ProfileDrawer({
       <header><div><span aria-hidden="true">{displayName.slice(0, 1).toUpperCase()}</span><p><strong id="profile-drawer-title">{displayName}</strong><small>{email || "Signed-in athlete"}</small></p></div><button onClick={onClose} aria-label="Close profile">×</button></header>
       <section className="account-profile"><p className="eyebrow">Athlete profile</p><label>Display name<input value={draft.displayName} maxLength={80} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="How FORGE should address you" /></label><dl><div><dt>Account</dt><dd>Protected</dd></div><div><dt>Plan</dt><dd>Free</dd></div><div><dt>Data</dt><dd>Account synced</dd></div></dl></section>
       <section><p className="eyebrow">Safety preferences</p><ul><li>Stop or adjust movements that cause pain.</li><li>Progress only with clean range of motion and control.</li><li>Review persistent symptoms with a qualified professional.</li></ul></section>
+      <section className="training-setup"><p className="eyebrow">Training setup</p><div>
+        <label>Primary goal<select value={draft.trainingGoal ?? "Strength"} onChange={(event) => setDraft((current) => ({ ...current, trainingGoal: event.target.value as TrainingGoal }))}><option>Strength</option><option>Muscle</option><option>Hybrid</option></select></label>
+        <label>Weekly rhythm<select value={draft.trainingDays ?? "5 days"} onChange={(event) => setDraft((current) => ({ ...current, trainingDays: event.target.value as TrainingDays }))}><option>3 days</option><option>4 days</option><option>5 days</option></select></label>
+        <label>Coach style<select value={draft.coachStyle ?? "Balanced"} onChange={(event) => setDraft((current) => ({ ...current, coachStyle: event.target.value as CoachStyle }))}><option>Protective</option><option>Balanced</option><option>Relentless</option></select></label>
+      </div><small>These choices guide the coaching preview and stay editable.</small></section>
       <section><p className="eyebrow">Preferences</p><div className="preference"><span>Units</span><div role="group" aria-label="Measurement units">{(["Metric", "Imperial"] as const).map((item) => <button aria-pressed={draft.units === item} className={draft.units === item ? "active" : ""} onClick={() => setDraft((current) => ({ ...current, units: item }))} key={item}>{item}</button>)}</div></div><div className="preference"><span>Session reminders</span><button aria-label="Session reminders" aria-pressed={draft.notifications} className={`toggle ${draft.notifications ? "on" : ""}`} onClick={() => setDraft((current) => ({ ...current, notifications: !current.notifications }))}><i /></button></div></section>
       <section className="demo-tools">
         <p className="eyebrow">Account</p>

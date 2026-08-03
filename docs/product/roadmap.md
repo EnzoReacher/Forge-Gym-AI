@@ -124,6 +124,9 @@ A redesigned screen does not ship until:
   a minimal audit event instead of deleting and recreating history.
 - [x] Replace remaining demonstrative metrics with account-owned records or
   explicit, plainly labelled defaults and planning previews.
+- [x] Persist the athlete's onboarding goal, weekly rhythm, and guidance style
+  to the protected account profile; validate all three values on write, show
+  them in profile controls, and use the selected style in the coaching preview.
 - [x] Remove invented starter-workout loads; new athletes choose their own
   comfortable load before FORGE records it.
 - [ ] Complete deployed browser-level weak connection, partial failure, and

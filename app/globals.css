@@ -1317,6 +1317,45 @@
   border-color: rgba(237,74,52,.55);
   box-shadow: 0 0 0 3px rgba(237,74,52,.08);
 }
+.training-setup > div {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(3,minmax(0,1fr));
+  gap: 8px;
+}
+.training-setup label {
+  color: #8d704f;
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  display: grid;
+  gap: 7px;
+}
+.training-setup select {
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 28px 0 10px;
+  border: 1px solid rgba(215,170,103,.18);
+  border-radius: 5px;
+  outline: 0;
+  background: #151311;
+  color: #f4e9dc;
+  font: 700 8px/1 var(--body);
+}
+.training-setup select:focus {
+  border-color: rgba(237,74,52,.55);
+  box-shadow: 0 0 0 3px rgba(237,74,52,.08);
+}
+.training-setup > small {
+  margin-top: 10px;
+  color: #746c65;
+  font-size: 7px;
+  line-height: 1.5;
+  display: block;
+}
+@media (max-width: 520px) {
+  .training-setup > div { grid-template-columns: 1fr; }
+}
 .demo-tools > a {
   width: 100%;
   min-height: 58px;
