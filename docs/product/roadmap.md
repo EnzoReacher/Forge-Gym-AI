@@ -137,6 +137,8 @@ A redesigned screen does not ship until:
 - [x] Reject tracked environment files, private keys, and common provider
   credentials before source verification can pass without printing detected
   secret values into CI logs.
+- [x] Schedule weekly npm and pinned GitHub Actions update proposals; group
+  compatible npm minor and patch updates while keeping major changes explicit.
 - [x] Define privacy-safe production alert signals, thresholds, resolution
   conditions, and response actions for authentication failures, state and
   record API failures, release health, latency, and elevated error rates.

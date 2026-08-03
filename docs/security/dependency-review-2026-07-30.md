@@ -32,6 +32,8 @@ not applied blindly.
 Controls until upstream-compatible fixes are available:
 
 - Keep the lockfile authoritative and use `npm ci`.
+- Review weekly Dependabot pull requests for npm and pinned GitHub Actions;
+  never auto-merge a change that has not passed source verification.
 - Run untrusted branches without production secrets.
 - Keep CI credentials least-privileged.
 - Do not run schema-generation or lint commands on untrusted repositories.
