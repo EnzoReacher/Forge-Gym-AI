@@ -134,6 +134,10 @@ A redesigned screen does not ship until:
   a slot now prepares a matching zero-load exercise session, carries its real
   title through Today, Train, completion and Progress, and prevents plan swaps
   during an active workout.
+- [x] Reuse the most recent completed values only when the athlete prepares the
+  same workout again. Carry forward matching set loads and reps as editable
+  reference values, reset effort and completion state, and never increase load
+  automatically or borrow data from a different session.
 - [x] Remove invented starter-workout loads; new athletes choose their own
   comfortable load before FORGE records it.
 - [ ] Complete deployed browser-level weak connection, partial failure, and

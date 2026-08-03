@@ -186,3 +186,47 @@ export function buildStarterSession(goal, trainingDays, requestedSlot = 1) {
     }),
   };
 }
+
+function safePreviousSet(value) {
+  if (!value || typeof value !== "object") return null;
+  if (!Number.isFinite(value.kg) || value.kg < 0 || value.kg > 1_000) return null;
+  if (!Number.isFinite(value.reps) || value.reps < 1 || value.reps > 1_000) return null;
+  return { kg: value.kg, reps: value.reps };
+}
+
+export function prepareStarterSession(goal, trainingDays, requestedSlot, workoutHistory = []) {
+  const session = buildStarterSession(goal, trainingDays, requestedSlot);
+  const matchingWorkout = Array.isArray(workoutHistory)
+    ? workoutHistory
+      .filter((workout) => workout && workout.title === session.title && Array.isArray(workout.sets))
+      .sort((left, right) => Number(right.completedAt || 0) - Number(left.completedAt || 0))[0]
+    : null;
+
+  if (!matchingWorkout) return { ...session, referenceUsed: false, referenceCompletedAt: null };
+
+  let copiedSets = 0;
+  const exercises = session.exercises.map((exercise) => {
+    const previousSets = matchingWorkout.sets
+      .filter((set) => set && set.exerciseName === exercise.name)
+      .sort((left, right) => Number(left.position || 0) - Number(right.position || 0));
+
+    return {
+      ...exercise,
+      sets: exercise.sets.map((set, index) => {
+        const previous = safePreviousSet(previousSets[index]);
+        if (!previous) return set;
+        copiedSets += 1;
+        return { ...set, ...previous, rir: 2, done: false };
+      }),
+    };
+  });
+
+  return {
+    ...session,
+    exercises,
+    referenceUsed: copiedSets > 0,
+    referenceCompletedAt: copiedSets > 0 && Number.isFinite(matchingWorkout.completedAt)
+      ? matchingWorkout.completedAt
+      : null,
+  };
+}

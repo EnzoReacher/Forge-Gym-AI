@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { buildStarterSession, buildStarterWeek } from "../app/training-plan.mjs";
+import { buildStarterSession, buildStarterWeek, prepareStarterSession } from "../app/training-plan.mjs";
 
 const pageUrl = new URL("../app/page.tsx", import.meta.url);
 
@@ -56,6 +56,50 @@ test("invalid or out-of-range session slots stay inside the saved weekly rhythm"
   assert.equal(buildStarterSession("Unknown", "99 days", "bad").title, "Upper strength");
 });
 
+test("preparing the same workout carries forward only the latest completed values", () => {
+  const prepared = prepareStarterSession("Muscle", "4 days", 1, [
+    {
+      title: "Upper A",
+      completedAt: 100,
+      sets: [{ exerciseName: "Incline dumbbell press", position: 0, kg: 20, reps: 10, rir: 1, done: true }],
+    },
+    {
+      title: "Upper A",
+      completedAt: 200,
+      sets: [
+        { exerciseName: "Incline dumbbell press", position: 0, kg: 30, reps: 8, rir: 0, done: true },
+        { exerciseName: "Incline dumbbell press", position: 1, kg: 28, reps: 9, rir: 1, done: true },
+      ],
+    },
+  ]);
+
+  assert.equal(prepared.referenceUsed, true);
+  assert.equal(prepared.referenceCompletedAt, 200);
+  assert.deepEqual(prepared.exercises[0].sets[0], { kg: 30, reps: 8, rir: 2, done: false });
+  assert.deepEqual(prepared.exercises[0].sets[1], { kg: 28, reps: 9, rir: 2, done: false });
+  assert.equal(prepared.exercises[0].sets[2].kg, 0);
+});
+
+test("preparation never borrows another workout or increases a previous load", () => {
+  const prepared = prepareStarterSession("Muscle", "4 days", 1, [
+    {
+      title: "Lower A",
+      completedAt: 300,
+      sets: [{ exerciseName: "Incline dumbbell press", position: 0, kg: 90, reps: 5 }],
+    },
+  ]);
+  assert.equal(prepared.referenceUsed, false);
+  assert.ok(prepared.exercises.every((exercise) => exercise.sets.every((set) => set.kg === 0)));
+
+  const exact = prepareStarterSession("Strength", "3 days", 1, [{
+    title: "Upper strength",
+    completedAt: 400,
+    sets: [{ exerciseName: "Incline dumbbell press", position: 0, kg: 42, reps: 6 }],
+  }]);
+  assert.equal(exact.exercises[0].sets[0].kg, 42);
+  assert.equal(exact.exercises[0].sets[0].reps, 6);
+});
+
 test("training screen uses the saved profile choices and states the plan boundary", async () => {
   const page = await readFile(pageUrl, "utf8");
 
@@ -63,6 +107,7 @@ test("training screen uses the saved profile choices and states the plan boundar
   assert.match(page, /onSelectSession\(Number\(day\.slot\)\)/);
   assert.match(page, /title: plannedSession\.title/);
   assert.match(page, /Choose your loads before you begin/);
+  assert.match(page, /previous values loaded as a reference/);
   assert.match(page, /Built from the choices saved in your profile/);
   assert.doesNotMatch(page, /illustrative until weekly planning is connected/);
   assert.doesNotMatch(page, /const weekPlan = \[/);

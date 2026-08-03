@@ -23,7 +23,7 @@ import {
   withMutationTimeout,
   writePendingMutations,
 } from "./record-mutation-queue.mjs";
-import { buildStarterSession, buildStarterWeek } from "./training-plan.mjs";
+import { buildStarterSession, buildStarterWeek, prepareStarterSession } from "./training-plan.mjs";
 
 type Screen = "Today" | "Train" | "Fuel" | "Coach" | "Progress";
 type TrainView = "Session" | "Week" | "Library";
@@ -1008,10 +1008,10 @@ export default function Home({
       profile.coachStyle !== initialSetup.coachStyle;
     if (!changed) return;
 
-    const session = buildStarterSession(initialSetup.trainingGoal, initialSetup.trainingDays, 1);
+    const session = prepareStarterSession(initialSetup.trainingGoal, initialSetup.trainingDays, 1, workoutHistory);
     setProfile((current) => ({ ...current, ...initialSetup, trainingSlot: 1 }));
     if (!workoutStarted) setExercises(session.exercises as Exercise[]);
-  }, [accountBacked, accountLoadIssue, accountReady, initialSetup, profile, setExercises, setProfile, workoutStarted]);
+  }, [accountBacked, accountLoadIssue, accountReady, initialSetup, profile, setExercises, setProfile, workoutHistory, workoutStarted]);
 
   function go(next: Screen) {
     setScreen(next);
@@ -1046,14 +1046,17 @@ export default function Home({
       setToast("Finish or end the current workout before changing sessions.");
       return;
     }
-    const session = buildStarterSession(
+    const session = prepareStarterSession(
       profile.trainingGoal ?? "Strength",
       profile.trainingDays ?? "5 days",
       slot,
+      workoutHistory,
     );
     setProfile((current) => ({ ...current, trainingSlot: session.slot }));
     setExercises(session.exercises as Exercise[]);
-    setToast(`${session.title} is ready. Choose your loads before you begin.`);
+    setToast(session.referenceUsed
+      ? `${session.title} is ready with your last completed values. Adjust them for today.`
+      : `${session.title} is ready. Choose your loads before you begin.`);
   }
 
   function finishWorkout(summary: WorkoutSummary) {
@@ -1079,7 +1082,7 @@ export default function Home({
       onEnter={(mode, setup) => {
         if (mode === "new" && accountBacked) {
           if (setup) {
-            const session = buildStarterSession(setup.trainingGoal, setup.trainingDays, 1);
+            const session = prepareStarterSession(setup.trainingGoal, setup.trainingDays, 1, workoutHistory);
             setProfile((current) => ({ ...current, ...setup, trainingSlot: 1 }));
             setExercises(session.exercises as Exercise[]);
             setupApplied.current = true;
@@ -1139,7 +1142,7 @@ export default function Home({
           adultConfirmedAt: new Date().toISOString(),
         });
         if (initialSetup) {
-          const session = buildStarterSession(initialSetup.trainingGoal, initialSetup.trainingDays, 1);
+          const session = prepareStarterSession(initialSetup.trainingGoal, initialSetup.trainingDays, 1, workoutHistory);
           setExercises(session.exercises as Exercise[]);
         }
       }}
@@ -1217,7 +1220,7 @@ export default function Home({
                 trainingSlot: profile.trainingSlot,
               });
             } else if (planChanged) {
-              const session = buildStarterSession(next.trainingGoal ?? "Strength", next.trainingDays ?? "5 days", 1);
+              const session = prepareStarterSession(next.trainingGoal ?? "Strength", next.trainingDays ?? "5 days", 1, workoutHistory);
               setExercises(session.exercises as Exercise[]);
               setProfile({ ...next, trainingSlot: 1 });
             } else {
@@ -1397,6 +1400,7 @@ function Train({
   const done = allSets.filter((set) => set.done);
   const progress = Math.round(done.length / allSets.length * 100);
   const volume = done.reduce((total, set) => total + set.kg * set.reps, 0);
+  const hasLoadedValues = exercises.some((exercise) => exercise.sets.some((set) => set.kg > 0));
   const visibleLibrary = exerciseLibrary.filter((move) => `${move.target} ${move.name} ${move.role}`.toLowerCase().includes(libraryQuery.trim().toLowerCase()));
   const weekPlan = buildStarterWeek(setup.trainingGoal, setup.trainingDays);
 
@@ -1534,7 +1538,7 @@ function Train({
       {view === "Session" && <div id="train-panel-session" className="training-layout" role="tabpanel" aria-labelledby="train-tab-session">
         <section className="training-main">
           <div className="training-banner">
-            <div><p className="eyebrow hot">{started ? "Workout in progress" : `Workout ${String(plannedSession.slot).padStart(2, "0")}`}</p><h2>{plannedSession.title}</h2><span>{started ? `${done.length} of ${allSets.length} sets logged · ${volume.toLocaleString()} kg` : `${plannedSession.focus} · ${allSets.length} working sets · choose a comfortable load`}</span></div>
+            <div><p className="eyebrow hot">{started ? "Workout in progress" : `Workout ${String(plannedSession.slot).padStart(2, "0")}`}</p><h2>{plannedSession.title}</h2><span>{started ? `${done.length} of ${allSets.length} sets logged · ${volume.toLocaleString()} kg` : hasLoadedValues ? `${plannedSession.focus} · previous values loaded as a reference · adjust for today` : `${plannedSession.focus} · ${allSets.length} working sets · choose a comfortable load`}</span></div>
             <button className="primary-action" onClick={beginSession}>{started ? `Live · ${elapsed}` : "Begin session"} <span>→</span></button>
           </div>
           <div className="exercise-accordion">
