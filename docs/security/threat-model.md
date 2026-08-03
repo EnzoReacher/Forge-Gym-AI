@@ -58,7 +58,7 @@ product does not need must not be collected.
 | Browser injection and framing | Per-response nonce CSP, denied framing, restrictive permissions, no-referrer policy, and MIME sniffing protection | Built-worker response test checks every script nonce and security header |
 | Mutation abuse | Exact-origin checks, JSON-only mutations, validation, and durable per-account write limits | Request-boundary and rate-limit tests |
 | Excessive privilege in future admin tools | Admin remains out of scope until MFA, audit logs, monitoring, and explicit authorization exist | Admin release gate |
-| Dependency or CI supply-chain compromise | Locked dependencies, automated updates, least-privilege CI, and pinned GitHub Actions | CI and dependency review remain required |
+| Dependency, credential, or CI supply-chain compromise | Locked dependencies, deterministic tracked-source secret scanning, automated updates, least-privilege CI, and pinned GitHub Actions | CI and dependency review remain required; any exposed credential must be rotated rather than merely removed from Git history |
 
 ## Residual risks
 

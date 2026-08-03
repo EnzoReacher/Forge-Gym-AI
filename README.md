@@ -38,7 +38,7 @@ FORGE is currently an owner-only authenticated private beta. It includes:
 - Server-owned account role, status, and plan foundations.
 - Record correction, export, deliberate account deletion, and a public privacy
   notice describing the current product.
-- Input validation, 58 automated checks, account-isolation coverage, and
+- Input validation, automated checks, account-isolation coverage, and
   privacy-safe operational telemetry.
 
 Planning and coaching previews are explicitly labelled. Public multi-user
@@ -94,6 +94,7 @@ npm run dev
 
 ```bash
 npm test
+npm run security:secrets
 ```
 
 ### Production build

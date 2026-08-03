@@ -134,6 +134,9 @@ A redesigned screen does not ship until:
 - [x] Run a least-privilege, SHA-pinned source verification workflow on every
   pull request and production-branch update, including lint, build, tests, and
   a production dependency vulnerability gate.
+- [x] Reject tracked environment files, private keys, and common provider
+  credentials before source verification can pass without printing detected
+  secret values into CI logs.
 - [x] Define privacy-safe production alert signals, thresholds, resolution
   conditions, and response actions for authentication failures, state and
   record API failures, release health, latency, and elevated error rates.

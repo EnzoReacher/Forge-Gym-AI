@@ -6,6 +6,7 @@ const workflowUrl = new URL(
   "../.github/workflows/source-verification.yml",
   import.meta.url,
 );
+const packageUrl = new URL("../package.json", import.meta.url);
 
 test("source verification runs for pull requests and the production branch", async () => {
   const workflow = await readFile(workflowUrl, "utf8");
@@ -34,8 +35,18 @@ test("source verification installs from the lock and checks the full source", as
   const workflow = await readFile(workflowUrl, "utf8");
 
   assert.match(workflow, /run: npm ci/);
+  assert.match(workflow, /run: npm run security:secrets/);
   assert.match(workflow, /run: npm run lint/);
   assert.match(workflow, /run: npm test/);
   assert.match(workflow, /run: npm audit --omit=dev --audit-level=high/);
   assert.match(workflow, /timeout-minutes: 15/);
+});
+
+test("secret verification is a checked-in deterministic command", async () => {
+  const packageJson = JSON.parse(await readFile(packageUrl, "utf8"));
+
+  assert.equal(
+    packageJson.scripts["security:secrets"],
+    "node scripts/scan-secrets.mjs",
+  );
 });

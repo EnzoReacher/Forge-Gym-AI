@@ -32,6 +32,9 @@ jobs:
       - name: Install the locked dependency graph
         run: npm ci
 
+      - name: Reject credentials in tracked source
+        run: npm run security:secrets
+
       - name: Check source quality
         run: npm run lint
 
