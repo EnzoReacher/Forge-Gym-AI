@@ -1,4 +1,4 @@
-import { COACH_MESSAGE_MAX_LENGTH } from "./coach-engine.mjs";
+import { COACH_MESSAGE_MAX_LENGTH, isCoachReply } from "./coach-engine.mjs";
 
 export class CoachRequestError extends Error {
   constructor(code) {
@@ -6,18 +6,6 @@ export class CoachRequestError extends Error {
     this.name = "CoachRequestError";
     this.code = code;
   }
-}
-
-function validReply(value) {
-  return value
-    && typeof value === "object"
-    && !Array.isArray(value)
-    && typeof value.answer === "string"
-    && value.answer.length > 0
-    && value.answer.length <= 1_200
-    && typeof value.intent === "string"
-    && ["rules"].includes(value.source)
-    && ["standard", "stop"].includes(value.safetyLevel);
 }
 
 export async function requestCoachReply(payload, { fetchImpl = fetch, timeoutMs = 8_000 } = {}) {
@@ -36,7 +24,7 @@ export async function requestCoachReply(payload, { fetchImpl = fetch, timeoutMs 
     });
     if (!response.ok) throw new CoachRequestError(response.status === 429 ? "rate_limited" : "unavailable");
     const body = await response.json();
-    if (!body || Object.keys(body).length !== 1 || !validReply(body.reply)) {
+    if (!body || Object.keys(body).length !== 1 || !isCoachReply(body.reply)) {
       throw new CoachRequestError("invalid_response");
     }
     return body.reply;

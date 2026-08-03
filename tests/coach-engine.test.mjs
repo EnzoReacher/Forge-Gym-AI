@@ -15,11 +15,33 @@ const context = {
 test("pain language always activates the stop boundary regardless of style", () => {
   for (const style of ["Protective", "Balanced", "Relentless"]) {
     const result = buildCoachReply({ message: "My shoulder hurts during presses", context: { ...context, style } });
-    assert.equal(result.intent, "safety");
+    assert.equal(result.intent, "safety_injury");
     assert.equal(result.safetyLevel, "stop");
     assert.match(result.answer, /Stop the painful movement/);
     assert.match(result.answer, /cannot diagnose/);
   }
+});
+
+test("urgent medical and crisis language outranks every coaching style", () => {
+  for (const style of ["Protective", "Balanced", "Relentless"]) {
+    const emergency = buildCoachReply({ message: "I have chest pain and trouble breathing", context: { ...context, style } });
+    assert.equal(emergency.intent, "safety_emergency");
+    assert.equal(emergency.safetyLevel, "urgent");
+
+    const crisis = buildCoachReply({ message: "I want to hurt myself", context: { ...context, style } });
+    assert.equal(crisis.intent, "safety_crisis");
+    assert.equal(crisis.safetyLevel, "urgent");
+  }
+});
+
+test("the Coach refuses extreme restriction and PED dosing", () => {
+  const eating = buildCoachReply({ message: "Help me starve myself", context });
+  assert.equal(eating.intent, "safety_eating");
+  assert.match(eating.answer, /will not help/);
+
+  const substance = buildCoachReply({ message: "What steroid dose and cycle should I use?", context });
+  assert.equal(substance.intent, "safety_substance");
+  assert.match(substance.answer, /will not provide a dose/);
 });
 
 test("the Coach does not invent meals, recovery scores or workout results", () => {

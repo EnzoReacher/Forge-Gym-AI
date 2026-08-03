@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CoachRequestError, requestCoachReply } from "../app/coach-client.mjs";
+import { COACH_POLICY_VERSION } from "../app/coach-engine.mjs";
 
 const payload = {
   message: "Review today",
@@ -16,7 +17,7 @@ const payload = {
 };
 
 test("the Coach client accepts only the fixed reply envelope", async () => {
-  const reply = { answer: "Continue carefully.", intent: "today", source: "rules", safetyLevel: "standard" };
+  const reply = { answer: "Continue carefully.", intent: "today", source: "rules", safetyLevel: "standard", policyVersion: COACH_POLICY_VERSION };
   const result = await requestCoachReply(payload, {
     fetchImpl: async (_url, options) => {
       assert.equal(options.method, "POST");

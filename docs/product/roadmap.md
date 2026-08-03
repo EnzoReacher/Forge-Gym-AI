@@ -145,6 +145,11 @@ A redesigned screen does not ship until:
   client timeout, duplicate-submit prevention, deterministic pain and
   no-invented-data rules, and a local outage fallback. Keep beta conversations
   out of account storage and defer provider and model selection.
+- [x] Add a fail-closed, versioned Coach release evaluation covering English
+  and Vietnamese injury, medical red flags, crisis language, extreme food
+  restriction, PED dosing, missing data, fabricated records, and prompt
+  injection. Require 100% critical-case passage without copying prompts or
+  replies into evaluation output before any future model adapter can ship.
 - [ ] Complete deployed browser-level weak connection, partial failure, and
   interrupted-session recovery checks.
 

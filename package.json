@@ -16,7 +16,8 @@
     "security:secrets": "node scripts/scan-secrets.mjs",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
-    "recovery:drill": "python3 scripts/restore-drill.py"
+    "recovery:drill": "python3 scripts/restore-drill.py",
+    "coach:eval": "node scripts/run-coach-evals.mjs"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
