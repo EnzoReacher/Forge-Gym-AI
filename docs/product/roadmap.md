@@ -122,6 +122,9 @@ A redesigned screen does not ship until:
 
 ## Operations before wider access
 
+- [x] Run a least-privilege, SHA-pinned source verification workflow on every
+  pull request and production-branch update, including lint, build, tests, and
+  a production dependency vulnerability gate.
 - [x] Define privacy-safe production alert signals, thresholds, resolution
   conditions, and response actions for authentication failures, state and
   record API failures, release health, latency, and elevated error rates.
