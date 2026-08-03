@@ -2,6 +2,13 @@
 
 import { FormEvent, memo, useCallback, useEffect, useRef, useState } from "react";
 import {
+  clearPendingAccountState,
+  createLatestAccountStateSync,
+  readPendingAccountState,
+  withAccountStateSyncTimeout,
+  writePendingAccountState,
+} from "./account-state-sync.mjs";
+import {
   applyPendingMutations,
   boundPendingMutationMap,
   drainPendingMutationQueue,
@@ -284,15 +291,39 @@ function useStoredState<T>(key: string, fallback: T, accountBacked = false) {
   const [loadError, setLoadError] = useState<AccountIssue>(null);
   const [syncError, setSyncError] = useState<AccountIssue>(null);
   const [retryNonce, setRetryNonce] = useState(0);
+  const latestValue = useRef(fallback);
+  const latestRevision = useRef(0);
+  const syncQueue = useRef<ReturnType<typeof createLatestAccountStateSync> | null>(null);
   const updateValue: typeof setValue = useCallback((next) => {
+    const resolved = typeof next === "function"
+      ? (next as (current: T) => T)(latestValue.current)
+      : next;
+    const revision = latestRevision.current + 1;
+    latestRevision.current = revision;
+    latestValue.current = resolved;
+    if (typeof window !== "undefined" && accountBacked) {
+      writePendingAccountState(window.sessionStorage, key, { revision, value: resolved });
+    }
     setDirty(true);
-    setValue(next);
-  }, []);
+    setValue(resolved);
+  }, [accountBacked, key]);
 
   useEffect(() => {
     let cancelled = false;
 
     if (accountBacked) {
+      const restored = readPendingAccountState(window.sessionStorage, key) as { revision: number; value: T } | null;
+      let restoredFrame = 0;
+      if (restored) {
+        latestRevision.current = restored.revision;
+        latestValue.current = restored.value;
+        restoredFrame = window.requestAnimationFrame(() => {
+          if (cancelled) return;
+          setValue(restored.value);
+          setDirty(true);
+        });
+      }
+
       fetch(`/api/state?key=${encodeURIComponent(key)}`, {
         headers: { Accept: "application/json" },
         credentials: "same-origin",
@@ -304,7 +335,12 @@ function useStoredState<T>(key: string, fallback: T, accountBacked = false) {
         .then((payload) => {
           if (!cancelled) {
             setLoadError(null);
-            if (payload.value !== null) setValue(payload.value);
+            // Never let a late initial read replace an edit restored from this
+            // tab or made while the read was in flight.
+            if (payload.value !== null && latestRevision.current === 0) {
+              latestValue.current = payload.value;
+              setValue(payload.value);
+            }
           }
         })
         .catch((error) => {
@@ -316,13 +352,18 @@ function useStoredState<T>(key: string, fallback: T, accountBacked = false) {
 
       return () => {
         cancelled = true;
+        if (restoredFrame) window.cancelAnimationFrame(restoredFrame);
       };
     }
 
     const frame = window.requestAnimationFrame(() => {
       try {
         const stored = window.localStorage.getItem(key);
-        if (stored) setValue(JSON.parse(stored));
+        if (stored) {
+          const parsed = JSON.parse(stored) as T;
+          latestValue.current = parsed;
+          setValue(parsed);
+        }
       } catch {}
       setReady(true);
     });
@@ -330,22 +371,49 @@ function useStoredState<T>(key: string, fallback: T, accountBacked = false) {
   }, [accountBacked, key]);
 
   useEffect(() => {
+    if (!accountBacked) return;
+
+    const queue = createLatestAccountStateSync({
+      write: async (item: { revision: number; value: T }) => {
+        await withAccountStateSyncTimeout(async (signal: AbortSignal) => {
+          const response = await fetch(`/api/state?key=${encodeURIComponent(key)}`, {
+            method: "PUT",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ value: item.value }),
+            signal,
+          });
+          if (!response.ok) throw new Error(accountIssueForStatus(response.status));
+        });
+      },
+      onSynced: (item: { revision: number }) => {
+        if (item.revision !== latestRevision.current) return;
+        clearPendingAccountState(window.sessionStorage, key);
+        setDirty(false);
+        setSyncError(null);
+      },
+      onError: (error: unknown) => setSyncError(accountIssueFromError(error)),
+    });
+    syncQueue.current = queue;
+
+    const retryWhenOnline = () => queue.retry();
+    window.addEventListener("online", retryWhenOnline);
+    return () => {
+      window.removeEventListener("online", retryWhenOnline);
+      queue.dispose();
+      if (syncQueue.current === queue) syncQueue.current = null;
+    };
+  }, [accountBacked, key]);
+
+  useEffect(() => {
     if (!ready || !dirty || (accountBacked && loadError)) return;
 
     if (accountBacked) {
       const id = window.setTimeout(() => {
-        fetch(`/api/state?key=${encodeURIComponent(key)}`, {
-          method: "PUT",
-          credentials: "same-origin",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ value }),
-        })
-          .then((response) => {
-            if (!response.ok) throw new Error(accountIssueForStatus(response.status));
-            setDirty(false);
-            setSyncError(null);
-          })
-          .catch((error) => setSyncError(accountIssueFromError(error)));
+        syncQueue.current?.enqueue({
+          revision: latestRevision.current,
+          value: latestValue.current,
+        });
       }, 450);
 
       return () => window.clearTimeout(id);

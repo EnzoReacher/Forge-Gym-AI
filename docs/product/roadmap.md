@@ -97,6 +97,10 @@ A redesigned screen does not ship until:
 - [x] Bound each network attempt, keep the in-memory queue capped, stop safely
   after a partial failure, and preserve a newer same-record edit when an older
   in-flight request completes.
+- [x] Serialize account-state writes per key, coalesce rapid edits to the newest
+  value, bound hung requests, and retain the latest Profile or live-workout
+  edit in temporary per-tab storage until the server confirms that exact
+  revision.
 - [x] Keep multi-table workout creation, correction, set replacement, audit,
   and deletion atomic so a partial database failure cannot split a workout
   from its sets or correction history.
