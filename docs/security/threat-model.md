@@ -48,6 +48,7 @@ product does not need must not be collected.
 | --- | --- | --- |
 | Anonymous access to account data | Protected page and API check the server-authenticated user | Missing identity returns `401` or redirects to sign-in |
 | One user reading or overwriting another user | Every state query is scoped by the authenticated account ID; no client-supplied owner ID is accepted | Automated source-boundary test plus future two-account integration test |
+| Personalized HTML reused across sessions | Protected documents are marked private and non-cacheable for browsers, shared caches, and the CDN; validators are removed | Built-worker tests verify both authenticated and signed-out `/app` responses |
 | Self-promotion to admin or paid plans | Role, status, and plan are server-owned and absent from writable profile state | No athlete endpoint may update these columns |
 | Malformed or oversized state | Key allowlist, payload size cap, type/range/length validation | Invalid keys and payloads return `400`; oversized payloads return `413` |
 | Password theft through a fake FORGE form | FORGE does not render password or email credential fields; dispatch owns sign-in | UI regression test ensures no password input exists |

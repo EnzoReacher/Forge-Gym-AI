@@ -37,6 +37,9 @@ test("missing identity shows safe recovery instead of starting a second sign-in"
 
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("location"), null);
+  assert.match(response.headers.get("cache-control") ?? "", /private/);
+  assert.match(response.headers.get("cache-control") ?? "", /no-store/);
+  assert.equal(response.headers.get("cdn-cache-control"), "no-store");
   const html = await response.text();
   assert.match(html, /Your secure session is unavailable/);
   assert.match(html, /\/signout-with-chatgpt\?return_to=%2F/);
@@ -52,6 +55,9 @@ test("platform identity opens the protected app without an auth redirect", async
 
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("location"), null);
+  assert.match(response.headers.get("cache-control") ?? "", /private/);
+  assert.match(response.headers.get("cache-control") ?? "", /no-store/);
+  assert.equal(response.headers.get("cdn-cache-control"), "no-store");
   const html = await response.text();
   assert.doesNotMatch(html, /Your secure session is unavailable/);
   assert.match(html, /Hoang Nguyen/);
@@ -67,5 +73,8 @@ test("authenticated onboarding returns to the same protected account", async () 
 
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("location"), null);
+  assert.match(response.headers.get("cache-control") ?? "", /private/);
+  assert.match(response.headers.get("cache-control") ?? "", /no-store/);
+  assert.equal(response.headers.get("cdn-cache-control"), "no-store");
   assert.doesNotMatch(await response.text(), /Your secure session is unavailable/);
 });

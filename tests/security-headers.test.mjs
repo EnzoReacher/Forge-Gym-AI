@@ -23,9 +23,33 @@ test("HTML responses receive a nonce CSP and restrictive browser headers", async
   assert.equal(response.headers.get("strict-transport-security"), "max-age=31536000");
   assert.match(response.headers.get("permissions-policy") ?? "", /camera=\(\)/);
   assert.equal(response.headers.has("server"), false);
+  assert.equal(
+    response.headers.get("cache-control"),
+    "private, no-store, max-age=0, must-revalidate",
+  );
+  assert.equal(response.headers.get("cdn-cache-control"), "no-store");
+  assert.equal(response.headers.get("surrogate-control"), "no-store");
+  assert.equal(response.headers.has("etag"), false);
+  assert.equal(response.headers.has("last-modified"), false);
 
   const html = await response.text();
   assert.equal((html.match(new RegExp(`nonce="${nonce}"`, "g")) ?? []).length, 2);
+});
+
+test("public documents are not mislabeled as private account responses", async () => {
+  const response = await applySecurityHeaders(
+    new Request("https://forge.example/privacy"),
+    new Response("<!doctype html><main>Privacy</main>", {
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "public, max-age=300",
+      },
+    }),
+  );
+
+  assert.equal(response.headers.get("cache-control"), "public, max-age=300");
+  assert.equal(response.headers.has("cdn-cache-control"), false);
+  assert.equal(response.headers.has("surrogate-control"), false);
 });
 
 test("non-document responses keep their body and receive static headers", async () => {

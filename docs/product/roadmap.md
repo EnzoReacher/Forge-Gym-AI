@@ -32,6 +32,9 @@ recoverable before making it larger.
 - [x] Reuse the platform-authenticated identity on `/app` without starting a
   redundant second ChatGPT sign-in, and provide a bounded session-reset path
   when identity forwarding is unavailable.
+- [x] Mark every protected account document private and non-cacheable at the
+  browser, shared-cache, and CDN layers so personalized HTML cannot be reused
+  across sessions.
 - [x] Add built-worker authentication contract tests for missing identity,
   returning accounts, and post-onboarding entry.
 - [x] Define a privacy-safe deployed authentication, two-account isolation,

@@ -14,6 +14,19 @@ function isHtml(response) {
   return /^text\/html\b/i.test(response.headers.get("content-type") ?? "");
 }
 
+function isPrivateDocument(request, response) {
+  const pathname = new URL(request.url).pathname;
+  return isHtml(response) && /^\/(?:app|admin)(?:\/|$)/.test(pathname);
+}
+
+function preventPrivateDocumentCaching(headers) {
+  headers.set("Cache-Control", "private, no-store, max-age=0, must-revalidate");
+  headers.set("CDN-Cache-Control", "no-store");
+  headers.set("Surrogate-Control", "no-store");
+  headers.delete("ETag");
+  headers.delete("Last-Modified");
+}
+
 function contentSecurityPolicy(nonce, isHttps) {
   const directives = [
     "default-src 'self'",
@@ -56,6 +69,10 @@ export async function applySecurityHeaders(request, response) {
   const isHttps = new URL(request.url).protocol === "https:";
   if (isHttps) {
     headers.set("Strict-Transport-Security", "max-age=31536000");
+  }
+
+  if (isPrivateDocument(request, response)) {
+    preventPrivateDocumentCaching(headers);
   }
 
   if (!isHtml(response)) {
