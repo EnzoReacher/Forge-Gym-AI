@@ -53,10 +53,13 @@ test("the primary sign-in screen never collects a password", async () => {
 });
 
 test("expired and restricted sessions have explicit recovery states", async () => {
-  const page = await source("app/page.tsx");
+  const [page, requestErrors] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/account-request-error.mjs"),
+  ]);
 
-  assert.match(page, /status === 401[\s\S]*return "session"/);
-  assert.match(page, /status === 403[\s\S]*return "access"/);
+  assert.match(requestErrors, /status === 401[\s\S]*return "session"/);
+  assert.match(requestErrors, /status === 403[\s\S]*return "access"/);
   assert.match(page, /Your session has ended\. Sign in again to continue\./);
   assert.match(page, /This account cannot access FORGE right now\./);
   assert.match(page, /Your saved data has not been changed\./);

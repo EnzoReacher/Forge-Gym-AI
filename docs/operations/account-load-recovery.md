@@ -18,3 +18,10 @@ account-state or record request stalls.
 These deterministic checks do not replace the deployed weak-network and
 interrupted-session release gate. That gate remains open until the production
 browser matrix is completed and recorded.
+
+When an API response includes the server-generated `X-Request-Id`, FORGE keeps
+that UUID with the bounded account issue and shows it only on the related error
+surface. The reference contains no identity, URL, request body, or saved value;
+it lets support correlate a user-visible failure with the fixed-shape
+operational event. Network failures without a server response never invent a
+reference.

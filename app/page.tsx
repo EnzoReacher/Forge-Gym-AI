@@ -3,6 +3,12 @@
 import { FormEvent, memo, useCallback, useEffect, useRef, useState } from "react";
 import { loadAccountResource } from "./account-load-recovery.mjs";
 import {
+  accountIssueFromError,
+  accountIssueReference,
+  accountRequestError,
+  dominantAccountIssue,
+} from "./account-request-error.mjs";
+import {
   clearPendingAccountState,
   createLatestAccountStateSync,
   readPendingAccountState,
@@ -54,7 +60,10 @@ type PendingRecordMutation = {
   record?: RecordValue;
   createdAt: number;
 };
-type AccountIssue = "session" | "access" | "unavailable" | null;
+type AccountIssue = {
+  kind: "session" | "access" | "unavailable";
+  requestId: string | null;
+} | null;
 type LibraryMove = {
   target: string;
   name: string;
@@ -211,26 +220,6 @@ function isSameLocalDay(timestamp: number, now = Date.now()) {
     && recordDate.getDate() === currentDate.getDate();
 }
 
-function accountIssueForStatus(status: number): Exclude<AccountIssue, null> {
-  if (status === 401) return "session";
-  if (status === 403) return "access";
-  return "unavailable";
-}
-
-function accountIssueFromError(error: unknown): Exclude<AccountIssue, null> {
-  if (error instanceof Error && ["session", "access", "unavailable"].includes(error.message)) {
-    return error.message as Exclude<AccountIssue, null>;
-  }
-  return "unavailable";
-}
-
-function dominantAccountIssue(issues: AccountIssue[]): AccountIssue {
-  if (issues.includes("session")) return "session";
-  if (issues.includes("access")) return "access";
-  if (issues.includes("unavailable")) return "unavailable";
-  return null;
-}
-
 function WorkoutComplete({ summary, onToday, onProgress }: { summary: WorkoutSummary; onToday: () => void; onProgress: () => void }) {
   const dialogRef = useModalA11y<HTMLDivElement>(onToday);
 
@@ -333,10 +322,10 @@ function useStoredState<T>(key: string, fallback: T, accountBacked = false) {
             credentials: "same-origin",
             signal,
           });
-          if (!response.ok) throw new Error(accountIssueForStatus(response.status));
+          if (!response.ok) throw accountRequestError(response);
           return response.json() as Promise<{ value: T | null }>;
         },
-        { shouldRetry: (error: unknown) => accountIssueFromError(error) === "unavailable" },
+        { shouldRetry: (error: unknown) => accountIssueFromError(error).kind === "unavailable" },
       )
         .then((payload) => {
           if (!cancelled) {
@@ -389,7 +378,7 @@ function useStoredState<T>(key: string, fallback: T, accountBacked = false) {
             body: JSON.stringify({ value: item.value }),
             signal,
           });
-          if (!response.ok) throw new Error(accountIssueForStatus(response.status));
+          if (!response.ok) throw accountRequestError(response);
         });
       },
       onSynced: (item: { revision: number }) => {
@@ -472,7 +461,7 @@ function useDurableRecords(accountBacked: boolean) {
           body: JSON.stringify({ type: mutation.type, record: mutation.record }),
           signal,
         });
-      if (!response.ok) throw new Error(accountIssueForStatus(response.status));
+      if (!response.ok) throw accountRequestError(response);
     });
   }, []);
 
@@ -529,10 +518,10 @@ function useDurableRecords(accountBacked: boolean) {
           credentials: "same-origin",
           signal,
         });
-        if (!response.ok) throw new Error(accountIssueForStatus(response.status));
+        if (!response.ok) throw accountRequestError(response);
         return response.json() as Promise<{ workouts: WorkoutSummary[]; meals: Meal[]; hydration: HydrationEntry[] }>;
       },
-      { shouldRetry: (error: unknown) => accountIssueFromError(error) === "unavailable" },
+      { shouldRetry: (error: unknown) => accountIssueFromError(error).kind === "unavailable" },
     )
       .then((records) => {
         if (cancelled) return;
@@ -1009,17 +998,18 @@ export default function Home({
   }
 
   if (accountLoadIssue) {
-    const message = accountLoadIssue === "session"
+    const message = accountLoadIssue.kind === "session"
       ? "Your session has ended. Sign in again to continue."
-      : accountLoadIssue === "access"
+      : accountLoadIssue.kind === "access"
         ? "This account cannot access FORGE right now."
         : "FORGE could not load your account. Your saved data has not been changed.";
-    const action = accountLoadIssue === "session"
+    const action = accountLoadIssue.kind === "session"
       ? () => window.location.assign("/signout-with-chatgpt?return_to=%2F")
-      : accountLoadIssue === "access"
+      : accountLoadIssue.kind === "access"
         ? () => window.location.reload()
         : retryAccountData;
-    return <div className="account-loading account-error" role="alert"><ForgeAmbience density={10} /><strong>FORGE</strong><span>{message}</span><button onClick={action}>{accountLoadIssue === "session" ? "Sign in again" : accountLoadIssue === "access" ? "Reload account" : "Try again"}</button></div>;
+    const reference = accountIssueReference(accountLoadIssue);
+    return <div className="account-loading account-error" role="alert"><ForgeAmbience density={10} /><strong>FORGE</strong><span>{message}</span>{reference && <small>{reference}</small>}<button onClick={action}>{accountLoadIssue.kind === "session" ? "Sign in again" : accountLoadIssue.kind === "access" ? "Reload account" : "Try again"}</button></div>;
   }
 
   return (
@@ -1095,25 +1085,26 @@ export default function Home({
             });
             if (!response.ok) {
               const payload = await response.json().catch(() => null) as { error?: string } | null;
-              throw new Error(payload?.error || "FORGE could not delete this account.");
+              const reference = accountIssueReference(accountIssueFromError(accountRequestError(response)));
+              throw new Error(`${payload?.error || "FORGE could not delete this account."}${reference ? ` ${reference}.` : ""}`);
             }
             window.location.assign("/signout-with-chatgpt?return_to=%2F");
           }}
         />}
         {toast && <div className="toast" role="status" aria-live="polite"><i>✓</i>{toast}</div>}
-        {accountSyncIssue && <div className="sync-warning" role={accountSyncIssue === "session" ? "alert" : "status"}><span>{
-          accountSyncIssue === "session"
+        {accountSyncIssue && <div className="sync-warning" role={accountSyncIssue.kind === "session" ? "alert" : "status"}><span>{
+          accountSyncIssue.kind === "session"
             ? "Your session ended. Sign in again before continuing."
-            : accountSyncIssue === "access"
+            : accountSyncIssue.kind === "access"
               ? "Account access is unavailable. New changes cannot sync."
               : "Account sync paused. Your action is still shown here."
-        }</span><button onClick={() => {
-          if (accountSyncIssue === "session" || accountSyncIssue === "access") {
+        }{accountIssueReference(accountSyncIssue) && <small>{accountIssueReference(accountSyncIssue)}</small>}</span><button onClick={() => {
+          if (accountSyncIssue.kind === "session" || accountSyncIssue.kind === "access") {
             window.location.reload();
             return;
           }
           retryAccountData();
-        }}>{accountSyncIssue === "session" ? "Sign in again" : accountSyncIssue === "access" ? "Reload account" : "Retry now"}</button></div>}
+        }}>{accountSyncIssue.kind === "session" ? "Sign in again" : accountSyncIssue.kind === "access" ? "Reload account" : "Retry now"}</button></div>}
       </div>
       {finishSummary && <WorkoutComplete
         summary={finishSummary}

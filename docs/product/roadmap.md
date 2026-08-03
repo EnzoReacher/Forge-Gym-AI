@@ -18,6 +18,9 @@ recoverable before making it larger.
   stored values remain separate.
 - [x] Emit fixed-shape operational events without identity, request bodies, or
   saved state.
+- [x] Carry the server-generated request reference into account load, sync, and
+  deletion failures so support can correlate a report with privacy-safe
+  operational telemetry without exposing identity or saved data.
 - [x] Route entry through the protected `/app` page so an existing ChatGPT
   session is reused and anonymous visitors are redirected by the server-owned
   sign-in gate without starting a redundant second sign-in.
