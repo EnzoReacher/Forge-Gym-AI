@@ -140,6 +140,11 @@ A redesigned screen does not ship until:
   automatically or borrow data from a different session.
 - [x] Remove invented starter-workout loads; new athletes choose their own
   comfortable load before FORGE records it.
+- [x] Establish a model-agnostic Coach foundation with strict input and reply
+  contracts, active-account access, durable owner-scoped limits, bounded
+  client timeout, duplicate-submit prevention, deterministic pain and
+  no-invented-data rules, and a local outage fallback. Keep beta conversations
+  out of account storage and defer provider and model selection.
 - [ ] Complete deployed browser-level weak connection, partial failure, and
   interrupted-session recovery checks.
 

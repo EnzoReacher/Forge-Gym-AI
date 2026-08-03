@@ -39,5 +39,5 @@ test("account state validates setup choices and profile exposes editable control
   assert.match(route, /Number\.isInteger\(value\.trainingSlot\)/);
   assert.match(page, /<p className="eyebrow">Training setup<\/p>/);
   assert.match(page, /<dt>Guidance<\/dt><dd>\{setup\.coachStyle\}<\/dd>/);
-  assert.match(page, /styleLead\[setup\.coachStyle\]/);
+  assert.match(page, /style: setup\.coachStyle/);
 });

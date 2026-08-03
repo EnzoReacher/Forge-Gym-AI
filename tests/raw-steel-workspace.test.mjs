@@ -15,7 +15,7 @@ test("athlete workspace distinguishes account records, defaults, and previews", 
   assert.match(page, /Your starter structure/);
   assert.match(page, /Built from the choices saved in your profile/);
   assert.match(page, /current default targets/);
-  assert.match(page, /Rule-based prototype/);
+  assert.match(page, /Stable rules · model deferred/);
   assert.doesNotMatch(page, /Readiness 92|Tactical channel open|SPARTAN \/ 01/);
   assert.doesNotMatch(page, /Protect right knee|Last top set: 30 kg/);
 });

@@ -23,6 +23,8 @@ import {
   withMutationTimeout,
   writePendingMutations,
 } from "./record-mutation-queue.mjs";
+import { requestCoachReply } from "./coach-client.mjs";
+import { buildCoachReply, COACH_MESSAGE_MAX_LENGTH } from "./coach-engine.mjs";
 import { buildStarterSession, buildStarterWeek, prepareStarterSession } from "./training-plan.mjs";
 
 type Screen = "Today" | "Train" | "Fuel" | "Coach" | "Progress";
@@ -1775,38 +1777,63 @@ function Fuel({
 }
 function Coach({ exercises, meals, setup }: { exercises: Exercise[]; meals: Meal[]; setup: ForgeSetup }) {
   const [input, setInput] = useState("");
+  const [pending, setPending] = useState(false);
+  const [coachMode, setCoachMode] = useState<"ready" | "offline">("ready");
   const styleOpening: Record<CoachStyle, string> = {
     Protective: "I will keep fatigue, pain and recovery visible in every answer.",
     Balanced: "I will keep the next action direct and put sensible guardrails around it.",
     Relentless: "I will be brief and demanding, but pain and unsafe work still stop the plan.",
   };
-  const [messages, setMessages] = useState([{ role: "coach", text: `${styleOpening[setup.coachStyle]} This preview uses simple rules, not a live AI coaching service.` }]);
+  const [messages, setMessages] = useState<Array<{ role: "coach" | "user"; text: string; source?: "rules" | "offline" }>>([
+    { role: "coach", text: `${styleOpening[setup.coachStyle]} This Coach currently uses stable rules; model selection is deliberately deferred.`, source: "rules" },
+  ]);
   const protein = meals.reduce((total, meal) => total + meal.protein, 0);
   const done = exercises.flatMap((exercise) => exercise.sets).filter((set) => set.done).length;
   const totalSets = exercises.flatMap((exercise) => exercise.sets).length;
-  const proteinLeft = Math.max(0, 190 - protein);
   const quick = [
     { label: "Review today", prompt: "Review what I logged today" },
     { label: "Plan a simple dinner", prompt: "What is a simple dinner option?" },
     { label: "Adjust for pain", prompt: "How should I adjust if a movement hurts?" },
   ];
 
-  function send(text = input) {
-    if (!text.trim()) return;
-    const lower = text.toLowerCase();
-    const styleLead: Record<CoachStyle, string> = {
-      Protective: "Keep the next decision conservative.",
-      Balanced: "Use today’s evidence, then take one clear step.",
-      Relentless: "Do the next clean rep; do not add work for ego.",
-    };
-    let answer = `${styleLead[setup.coachStyle]} You have logged ${done} of ${totalSets} working sets and ${protein} g of protein today. Finish the next planned set with clean technique before adding more work.`;
-    if (lower.includes("dinner") || lower.includes("ăn")) answer = `The current default target leaves about ${proteinLeft} g of protein. Keep dinner simple: a protein source, rice or another carbohydrate, vegetables and water. Adjust portions to your needs.`;
-    if (lower.includes("pain") || lower.includes("hurt") || lower.includes("đau")) answer = "Stop the painful movement. Reduce load or range only if the movement becomes pain-free. New swelling, weakness or persistent pain needs qualified medical advice.";
-    setMessages((current) => [...current, { role: "user", text }, { role: "coach", text: answer }]);
-    setInput("");
+  const coachContext = {
+    doneSets: done,
+    totalSets,
+    proteinGrams: protein,
+    mealCount: meals.length,
+    goal: setup.trainingGoal,
+    trainingDays: setup.trainingDays,
+    style: setup.coachStyle,
+  };
+
+  function appendMessages(...next: Array<{ role: "coach" | "user"; text: string; source?: "rules" | "offline" }>) {
+    setMessages((current) => [...current, ...next].slice(-40));
   }
 
-  const nextMove = done ? `Continue with set ${Math.min(done + 1, totalSets)} of ${totalSets}.` : "Start with the first planned movement.";
+  async function send(value = input) {
+    const text = value.replace(/\s+/g, " ").trim();
+    if (!text || pending || text.length > COACH_MESSAGE_MAX_LENGTH) return;
+    setPending(true);
+    setInput("");
+    appendMessages({ role: "user", text });
+    try {
+      const reply = await requestCoachReply({ message: text, context: coachContext });
+      appendMessages({ role: "coach", text: reply.answer, source: "rules" });
+      setCoachMode("ready");
+    } catch {
+      const fallback = buildCoachReply({ message: text, context: coachContext });
+      appendMessages({ role: "coach", text: fallback.answer, source: "offline" });
+      setCoachMode("offline");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  const nextMove = totalSets > 0 && done >= totalSets
+    ? "Save the completed workout before changing the plan."
+    : done
+      ? `Continue with set ${done + 1} of ${totalSets}.`
+      : "Start with the first planned movement.";
 
   return (
     <div className="screen coach-screen">
@@ -1814,25 +1841,26 @@ function Coach({ exercises, meals, setup }: { exercises: Exercise[]; meals: Meal
 
       <section className="coach-next-move">
         <div><p className="eyebrow hot">Next useful move</p><h2>{nextMove}</h2><span>Keep the decision small. Technique and pain-free movement come before extra load.</span></div>
-        <button onClick={() => send("Review what I logged today")}>Explain this <b>→</b></button>
+        <button disabled={pending} onClick={() => send("Review what I logged today")}>Explain this <b>→</b></button>
       </section>
 
       <div className="coach-workspace">
         <section className="coach-chat">
           <header className="coach-chat-head">
             <div className="forge-orb"><span>F</span></div>
-            <div><p>FORGE Coach</p><small>Rule-based prototype</small></div>
+            <div><p>FORGE Coach</p><small>{coachMode === "offline" ? "Offline safeguard active" : pending ? "Checking today’s records…" : "Stable rules · model deferred"}</small></div>
           </header>
           <div className="conversation-feed" role="log" aria-live="polite" aria-label="Coach conversation">
-            {messages.map((message, index) => <div className={`chat-bubble ${message.role}`} key={index}><small>{message.role === "coach" ? "FORGE" : "You"}</small><p>{message.text}</p></div>)}
+            {messages.map((message, index) => <div className={`chat-bubble ${message.role}`} key={index}><small>{message.role === "coach" ? `FORGE${message.source === "offline" ? " · OFFLINE SAFEGUARD" : ""}` : "You"}</small><p>{message.text}</p></div>)}
           </div>
           <div className="coach-quick-prompts" aria-label="Suggested coach questions">
-            {quick.map((item) => <button onClick={() => send(item.prompt)} key={item.label}>{item.label}</button>)}
+            {quick.map((item) => <button disabled={pending} onClick={() => send(item.prompt)} key={item.label}>{item.label}</button>)}
           </div>
           <div className="coach-composer">
-            <input aria-label="Ask Forge Coach" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => event.key === "Enter" && send()} placeholder="Ask about today’s training or food…" />
-            <button aria-label="Send message" onClick={() => send()}>↑</button>
+            <input aria-label="Ask Forge Coach" maxLength={COACH_MESSAGE_MAX_LENGTH} disabled={pending} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => event.key === "Enter" && !event.nativeEvent.isComposing && send()} placeholder="Ask about today’s training or food…" />
+            <button disabled={pending || !input.trim()} aria-label="Send message" onClick={() => send()}>{pending ? "…" : "↑"}</button>
           </div>
+          <p className="coach-privacy-note"><span>{input.length}/{COACH_MESSAGE_MAX_LENGTH}</span>This beta chat is not saved to your account.</p>
         </section>
 
         <aside className="coach-intel">
@@ -1849,7 +1877,7 @@ function Coach({ exercises, meals, setup }: { exercises: Exercise[]; meals: Meal
             <span>!</span>
             <div><small>Safety boundary</small><strong>Pain changes the plan</strong><p>FORGE cannot diagnose injury or replace medical care.</p></div>
           </div>
-          <p className="coach-intel-note">This prototype does not call a production AI model. Its answers are intentionally limited and based only on the records shown here.</p>
+          <p className="coach-intel-note">No production AI model is connected. Requests are validated and rate-limited; if the Coach route is unavailable, the same safety rules run locally.</p>
         </aside>
       </div>
     </div>

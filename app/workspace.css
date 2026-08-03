@@ -524,6 +524,10 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .coach-composer{min-height:64px;margin:0;padding:0;border:0;border-top:1px solid var(--line);border-radius:0;background:transparent;display:grid;grid-template-columns:1fr 48px;gap:10px;align-items:center}
 .coach-composer input{width:100%;height:46px;padding:0 12px;border:0;outline:0;background:transparent;color:var(--ink)}
 .coach-composer button{width:44px;height:44px;border:1px solid var(--red);border-radius:0;background:var(--red);cursor:pointer}
+.coach-next-move button:disabled,.coach-quick-prompts button:disabled,.coach-composer button:disabled{cursor:not-allowed;opacity:.45}
+.coach-composer input:disabled{opacity:.65}
+.coach-privacy-note{margin:0;padding:8px 0 10px;color:var(--dim);font-size:10px;line-height:1.45;display:flex;justify-content:space-between;gap:16px}
+.coach-privacy-note span{color:var(--muted);font-variant-numeric:tabular-nums}
 .coach-intel{padding:14px 0 0;border:0;border-radius:0;background:transparent}
 .coach-intel>header{padding-bottom:17px;border-bottom:1px solid var(--line-strong);display:flex;justify-content:space-between;gap:12px}
 .coach-intel>header p{margin:0;font-size:13px;font-weight:650}
