@@ -69,11 +69,14 @@ test("server projection owns every workout and set regardless of client shape", 
 });
 
 test("records route authenticates and scopes reads, corrections, deletes, and exports", async () => {
-  const [route, requestSecurity] = await Promise.all([
+  const [route, accountAccess, requestSecurity] = await Promise.all([
     readFile(new URL("../app/api/records/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/account-access.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/request-security.mjs", import.meta.url), "utf8"),
   ]);
-  assert.match(route, /getChatGPTUser\(\)/);
+  assert.match(route, /getCurrentActiveAccount\(\)/);
+  assert.match(accountAccess, /getChatGPTUser\(\)/);
+  assert.match(accountAccess, /account\.status !== "active"/);
   assert.match(route, /auth\.account\.id/);
   assert.match(route, /eq\(workouts\.userId, auth\.account\.id\)/);
   assert.match(route, /eq\(meals\.userId, auth\.account\.id\)/);

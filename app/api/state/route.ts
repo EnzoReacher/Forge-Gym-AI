@@ -1,8 +1,8 @@
 import { and, eq, lt, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { auditEvents, requestLimits, userData, users } from "../../../db/schema";
-import { getChatGPTUser } from "../../chatgpt-auth";
+import { auditEvents, requestLimits, userData } from "../../../db/schema";
 import { observeApiRequest } from "../../operational-events.mjs";
+import { getCurrentActiveAccount } from "../account-access";
 import {
   consumeAccountWriteLimit,
   mutationRequestProblem,
@@ -28,8 +28,6 @@ const ALLOWED_KEYS = new Set([
 const MAX_BODY_BYTES = 200_000;
 const STATE_WRITE_LIMIT = 120;
 
-type Account = typeof users.$inferSelect;
-
 function json(body: unknown, status = 200, headers: HeadersInit = {}) {
   return Response.json(body, {
     status,
@@ -44,52 +42,6 @@ function json(body: unknown, status = 200, headers: HeadersInit = {}) {
 function normalizedKey(request: Request) {
   const key = new URL(request.url).searchParams.get("key") ?? "";
   return ALLOWED_KEYS.has(key) ? key : null;
-}
-
-async function currentAccount(): Promise<
-  { account: Account } | { response: Response }
-> {
-  const identity = await getChatGPTUser();
-  if (!identity) return { response: json({ error: "Authentication required." }, 401) };
-
-  const email = identity.email.trim().toLowerCase();
-  if (!email || email.length > 254) {
-    return { response: json({ error: "Invalid authenticated identity." }, 401) };
-  }
-
-  const db = await getDb();
-  let account = await db.query.users.findFirst({
-    where: eq(users.email, email),
-  });
-
-  if (!account) {
-    await db
-      .insert(users)
-      .values({
-        id: crypto.randomUUID(),
-        email,
-        identityName: identity.fullName,
-      })
-      .onConflictDoNothing({ target: users.email });
-
-    account = await db.query.users.findFirst({
-      where: eq(users.email, email),
-    });
-  } else if (identity.fullName && identity.fullName !== account.identityName) {
-    await db
-      .update(users)
-      .set({
-        identityName: identity.fullName,
-        updatedAt: sql`CURRENT_TIMESTAMP`,
-      })
-      .where(eq(users.id, account.id));
-  }
-
-  if (!account || account.status !== "active") {
-    return { response: json({ error: "Account access is unavailable." }, 403) };
-  }
-
-  return { account };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -193,8 +145,10 @@ export async function GET(request: Request) {
     const key = normalizedKey(request);
     if (!key) return json({ error: "Unsupported state key." }, 400);
 
-    const auth = await currentAccount();
-    if ("response" in auth) return auth.response;
+      const auth = await getCurrentActiveAccount();
+      if ("problem" in auth) {
+        return json({ error: auth.problem.error }, auth.problem.status);
+      }
 
     const db = await getDb();
     try {
@@ -233,8 +187,10 @@ export async function PUT(request: Request) {
     const key = normalizedKey(request);
     if (!key) return json({ error: "Unsupported state key." }, 400);
 
-    const auth = await currentAccount();
-    if ("response" in auth) return auth.response;
+      const auth = await getCurrentActiveAccount();
+      if ("problem" in auth) {
+        return json({ error: auth.problem.error }, auth.problem.status);
+      }
 
     const db = await getDb();
     await db

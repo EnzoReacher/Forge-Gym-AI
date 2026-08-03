@@ -6,12 +6,11 @@ import {
   meals,
   requestLimits,
   userData,
-  users,
   workouts,
   workoutSets,
 } from "../../../db/schema";
-import { getChatGPTUser } from "../../chatgpt-auth";
 import { observeApiRequest } from "../../operational-events.mjs";
+import { getCurrentActiveAccount } from "../account-access";
 import {
   consumeAccountWriteLimit,
   mutationRequestProblem,
@@ -31,8 +30,6 @@ const MAX_BODY_BYTES = 120_000;
 const LEGACY_MIGRATION_KEY = "forge-record-migration-v1";
 const RECORD_CREATE_LIMIT = 180;
 const RECORD_CHANGE_LIMIT = 60;
-type Account = typeof users.$inferSelect;
-
 function json(body: unknown, status = 200, headers: HeadersInit = {}) {
   return Response.json(body, {
     status,
@@ -42,37 +39,6 @@ function json(body: unknown, status = 200, headers: HeadersInit = {}) {
       ...headers,
     },
   });
-}
-
-async function currentAccount(): Promise<
-  { account: Account } | { response: Response }
-> {
-  const identity = await getChatGPTUser();
-  if (!identity) return { response: json({ error: "Authentication required." }, 401) };
-
-  const email = identity.email.trim().toLowerCase();
-  if (!email || email.length > 254) {
-    return { response: json({ error: "Invalid authenticated identity." }, 401) };
-  }
-
-  const db = await getDb();
-  let account = await db.query.users.findFirst({
-    where: eq(users.email, email),
-  });
-
-  if (!account) {
-    await db.insert(users).values({
-      id: crypto.randomUUID(),
-      email,
-      identityName: identity.fullName,
-    }).onConflictDoNothing({ target: users.email });
-    account = await db.query.users.findFirst({ where: eq(users.email, email) });
-  }
-
-  if (!account || account.status !== "active") {
-    return { response: json({ error: "Account access is unavailable." }, 403) };
-  }
-  return { account };
 }
 
 async function readPayload(request: Request) {
@@ -209,8 +175,10 @@ export async function GET(request: Request) {
   return observeApiRequest(
     "account_records_read",
     async () => {
-      const auth = await currentAccount();
-      if ("response" in auth) return auth.response;
+      const auth = await getCurrentActiveAccount();
+      if ("problem" in auth) {
+        return json({ error: auth.problem.error }, auth.problem.status);
+      }
       await migrateLegacyRecords(auth.account.id);
       const records = await listRecords(auth.account.id);
       const exportRequested = new URL(request.url).searchParams.get("format") === "export";
@@ -239,8 +207,10 @@ export async function POST(request: Request) {
       const requestProblem = mutationRequestProblem(request, { requiresJson: true });
       if (requestProblem) return json({ error: requestProblem.error }, requestProblem.status);
 
-      const auth = await currentAccount();
-      if ("response" in auth) return auth.response;
+      const auth = await getCurrentActiveAccount();
+      if ("problem" in auth) {
+        return json({ error: auth.problem.error }, auth.problem.status);
+      }
       const db = await getDb();
       await db
         .delete(auditEvents)
@@ -311,8 +281,10 @@ export async function PATCH(request: Request) {
       const requestProblem = mutationRequestProblem(request, { requiresJson: true });
       if (requestProblem) return json({ error: requestProblem.error }, requestProblem.status);
 
-      const auth = await currentAccount();
-      if ("response" in auth) return auth.response;
+      const auth = await getCurrentActiveAccount();
+      if ("problem" in auth) {
+        return json({ error: auth.problem.error }, auth.problem.status);
+      }
       const db = await getDb();
       await db
         .delete(auditEvents)
@@ -451,8 +423,10 @@ export async function DELETE(request: Request) {
       const id = url.searchParams.get("id") ?? "";
       if (!validDelete(type, id)) return json({ error: "Invalid record target." }, 400);
 
-      const auth = await currentAccount();
-      if ("response" in auth) return auth.response;
+      const auth = await getCurrentActiveAccount();
+      if ("problem" in auth) {
+        return json({ error: auth.problem.error }, auth.problem.status);
+      }
       const db = await getDb();
       await db
         .delete(auditEvents)

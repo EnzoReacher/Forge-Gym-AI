@@ -10,6 +10,9 @@ recoverable before making it larger.
 - [x] Protect `/app` with platform-managed identity.
 - [x] Store account-owned state in D1.
 - [x] Keep role, status, and plan assignments server-owned.
+- [x] Route core state and record access through one fail-closed active-account
+  gate so authentication, suspension, identity updates, and future entitlement
+  checks cannot drift between APIs.
 - [x] Validate state keys, shapes, lengths, ranges, and payload size.
 - [x] Add a two-account service test that uses the same keys and proves the
   stored values remain separate.

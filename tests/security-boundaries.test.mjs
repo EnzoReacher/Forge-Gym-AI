@@ -19,9 +19,14 @@ test("protected app uses the platform-authenticated user without a second sign-i
 });
 
 test("account state is always scoped to the authenticated owner", async () => {
-  const route = await source("app/api/state/route.ts");
+  const [route, accountAccess] = await Promise.all([
+    source("app/api/state/route.ts"),
+    source("app/api/account-access.ts"),
+  ]);
 
-  assert.match(route, /getChatGPTUser\(\)/);
+  assert.match(route, /getCurrentActiveAccount\(\)/);
+  assert.match(accountAccess, /getChatGPTUser\(\)/);
+  assert.match(accountAccess, /account\.status !== "active"/);
   assert.match(route, /loadAccountState\([\s\S]*auth\.account\.id/);
   assert.match(route, /saveAccountState\([\s\S]*auth\.account\.id/);
   assert.match(route, /eq\(userData\.userId,\s*ownerId\)/);
